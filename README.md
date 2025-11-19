@@ -2,6 +2,309 @@
 
 A clean, minimal, hackable machine learning library optimized specifically for quantitative trading, streaming data, online learning, and low-latency CPU inference.
 
+## Table of Contents
+
+- [Installation](#installation)
+- [Dependencies](#dependencies)
+- [Quick Start](#quick-start)
+- [Directory Structure](#directory-structure)
+- [Usage for Research](#usage-for-research)
+- [Features](#features)
+- [Architecture](#architecture)
+- [Performance](#performance)
+- [Examples](#examples)
+- [Documentation](#documentation)
+- [Contributing](#contributing)
+- [License](#license)
+
+## Installation
+
+### From PyPI (when published)
+
+```bash
+pip install quantml
+```
+
+### From Source
+
+```bash
+git clone https://github.com/SritejBommaraju/quantmllibrary.git
+cd quantmllibrary
+pip install -e .
+```
+
+### With Optional Dependencies
+
+```bash
+# With NumPy for performance
+pip install quantml[numpy]
+
+# Development dependencies
+pip install -r requirements-dev.txt
+```
+
+### Using Conda
+
+```bash
+conda env create -f environment.yml
+conda activate quantml
+```
+
+## Dependencies
+
+### Core Dependencies
+
+- **Python**: >=3.8, <3.13
+- **NumPy**: >=1.20.0, <2.0.0 (optional, but recommended for performance)
+
+### Optional Dependencies
+
+- **pandas**: >=1.3.0 (for data loading and manipulation)
+- **pyyaml**: >=6.0 (for YAML config support)
+- **pyarrow**: (for Parquet feature caching)
+
+### Development Dependencies
+
+See `requirements-dev.txt` for testing, linting, and documentation tools.
+
+**Note**: The library works without NumPy, but performance is significantly better (2-5x faster) with NumPy installed.
+
+## Quick Start
+
+### Complete Working Example
+
+```python
+from quantml import Tensor
+from quantml.models import Linear
+from quantml.optim import Adam
+from quantml.training import QuantTrainer, FeaturePipeline
+from quantml.training.losses import mse_loss
+from quantml.training.features import normalize_features
+
+# 1. Load your data (replace with your data source)
+prices = [100.0, 101.0, 102.0, 103.0, 104.0, 105.0]
+volumes = [100.0, 110.0, 105.0, 120.0, 115.0, 125.0]
+
+# 2. Create features
+pipeline = FeaturePipeline()
+pipeline.add_lagged_feature('price', lags=[1, 5, 10])
+pipeline.add_rolling_feature('price', window=20, func='mean')
+pipeline.add_time_series_feature('price', 'returns')
+
+features = pipeline.transform({'price': prices})
+features = normalize_features(features, method='zscore')
+
+# 3. Create targets (forward returns)
+targets = [(prices[i+1] - prices[i]) / prices[i] for i in range(len(prices)-1)]
+features = features[:-1]  # Align
+
+# 4. Train model
+model = Linear(in_features=len(features[0]), out_features=1, bias=True)
+optimizer = Adam(model.parameters(), lr=0.001)
+trainer = QuantTrainer(model, optimizer, mse_loss)
+
+# Train
+for i in range(len(features)):
+    x = Tensor([features[i]])
+    y = Tensor([[targets[i]]])
+    trainer.train_step(x, y)
+
+# 5. Generate predictions
+predictions = []
+for feat in features:
+    x = Tensor([feat])
+    pred = model.forward(x)
+    pred_val = pred.data[0][0] if isinstance(pred.data[0], list) else pred.data[0]
+    predictions.append(pred_val)
+
+print(f"Generated {len(predictions)} predictions")
+```
+
+### Basic Tensor Operations
+
+```python
+from quantml import Tensor
+
+# Create tensors
+x = Tensor([1.0, 2.0, 3.0], requires_grad=True)
+y = Tensor([4.0, 5.0, 6.0], requires_grad=True)
+
+# Operations
+z = x + y
+z.backward()
+
+print(x.grad)  # [1.0, 1.0, 1.0]
+```
+
+### Quant Operations
+
+```python
+from quantml import Tensor
+from quantml import time_series
+
+# Price data
+prices = Tensor([100.0, 101.0, 102.0, 103.0, 104.0])
+
+# Exponential Moving Average
+ema_20 = time_series.ema(prices, n=20)
+
+# Rolling volatility
+vol = time_series.volatility(prices, n=20)
+
+# Returns
+rets = time_series.returns(prices)
+
+# VWAP
+volumes = Tensor([100.0, 110.0, 105.0, 120.0, 115.0])
+vwap = time_series.vwap(prices, volumes)
+```
+
+## Directory Structure
+
+```
+quantmllibrary/
+├── quantml/                    # Main library package
+│   ├── __init__.py            # Package initialization
+│   ├── tensor.py              # Core Tensor class
+│   ├── autograd.py            # Automatic differentiation
+│   ├── ops.py                 # Operations (NumPy-optimized)
+│   ├── functional.py          # Functional API
+│   ├── time_series.py         # Quant-specific operations
+│   ├── streaming.py           # Streaming tensors
+│   ├── online.py              # Online learning
+│   ├── config/                # Configuration management
+│   │   ├── __init__.py
+│   │   └── config.py          # YAML/JSON config support
+│   ├── data/                  # Data management
+│   │   ├── __init__.py
+│   │   ├── validators.py      # Data validation
+│   │   ├── loaders.py         # Data loaders
+│   │   ├── feature_store.py   # Feature caching
+│   │   └── memory_optimizer.py # Memory optimization
+│   ├── models/                # Neural network models
+│   │   ├── linear.py
+│   │   ├── rnn.py
+│   │   └── tcn.py
+│   ├── optim/                  # Optimizers and schedulers
+│   │   ├── sgd.py
+│   │   ├── adam.py
+│   │   ├── rmsprop.py
+│   │   ├── adagrad.py
+│   │   ├── adafactor.py
+│   │   ├── lookahead.py
+│   │   ├── radam.py
+│   │   ├── quant_optimizer.py
+│   │   └── schedulers.py
+│   ├── training/               # Training utilities
+│   │   ├── trainer.py
+│   │   ├── losses.py
+│   │   ├── metrics.py
+│   │   ├── features.py
+│   │   ├── walk_forward.py
+│   │   ├── backtest.py
+│   │   ├── alpha_eval.py
+│   │   └── ...
+│   ├── experiments/            # Experiment tracking
+│   │   └── ...
+│   └── utils/                  # Utilities
+│       ├── logging.py
+│       ├── reproducibility.py
+│       └── profiling.py
+├── examples/                   # Example scripts
+│   ├── quick_alpha.py         # Quick alpha generation
+│   ├── production_alpha.py   # Production pipeline
+│   ├── alpha_training.py      # Alpha training example
+│   └── ...
+├── tests/                      # Test suite
+│   ├── test_tensor.py
+│   ├── test_ops.py
+│   ├── test_models.py
+│   └── integration/
+├── configs/                   # Configuration files
+│   ├── base.yaml
+│   └── experiments/
+├── docs/                       # Documentation
+│   └── ...
+├── benchmarks/                 # Performance benchmarks
+├── requirements.txt            # Core dependencies
+├── requirements-dev.txt        # Dev dependencies
+├── environment.yml            # Conda environment
+├── pyproject.toml             # Package configuration
+└── README.md                  # This file
+```
+
+## Usage for Research
+
+### Overnight Gap Prediction
+
+```python
+from quantml.config import load_config, ExperimentConfig
+from quantml.data import load_csv_data, validate_price_data
+from quantml.training import FeaturePipeline, QuantTrainer
+from quantml.models import Linear
+from quantml.optim import Adam
+
+# Load configuration
+config = load_config('configs/experiments/overnight_gap.yaml')
+
+# Load and validate data
+data = load_csv_data(
+    config.data.data_path,
+    price_column='close',
+    volume_column='volume'
+)
+
+is_valid, errors = validate_price_data(data['prices'], data['volumes'])
+if not is_valid:
+    print(f"Data validation errors: {errors}")
+
+# Create features for gap prediction
+pipeline = FeaturePipeline()
+pipeline.add_lagged_feature('price', lags=[1, 5, 10, 20])
+pipeline.add_rolling_feature('price', window=20, func='mean')
+pipeline.add_time_series_feature('price', 'volatility', n=20)
+
+features = pipeline.transform({'price': data['prices']})
+
+# Train model (see examples/alpha_training.py for full example)
+```
+
+### Multi-Instrument Support (ES, MES, NQ, MNQ)
+
+```python
+from quantml.config import load_config
+
+# Load instrument-specific config
+es_config = load_config('configs/instruments/ES.yaml')
+mes_config = load_config('configs/instruments/MES.yaml')
+
+# Run experiments for each instrument
+for instrument, config in [('ES', es_config), ('MES', mes_config)]:
+    # Load data for instrument
+    # Create features
+    # Train model
+    # Evaluate
+    pass
+```
+
+### Walk-Forward Optimization
+
+```python
+from quantml.training import WalkForwardOptimizer, WindowType
+
+wfo = WalkForwardOptimizer(
+    window_type=WindowType.EXPANDING,
+    train_size=500,  # 500 days training
+    test_size=100    # 100 days testing
+)
+
+for train_idx, test_idx in wfo.split(features, n_splits=5):
+    # Train on train_idx (past data only)
+    # Test on test_idx (future data)
+    # No lookahead bias!
+    pass
+```
+
 ## Features
 
 ### Core Components
@@ -75,141 +378,6 @@ A clean, minimal, hackable machine learning library optimized specifically for q
 - **BacktestEngine**: Strategy backtesting with P&L tracking
 - **AlphaEvaluator**: Comprehensive alpha signal evaluation
 
-## Installation
-
-```bash
-pip install quantml
-```
-
-Or install from source:
-
-```bash
-git clone https://github.com/quantml/quantml.git
-cd quantml
-pip install -e .
-```
-
-## Quick Start
-
-### Basic Tensor Operations
-
-```python
-from quantml import Tensor
-
-# Create tensors
-x = Tensor([1.0, 2.0, 3.0], requires_grad=True)
-y = Tensor([4.0, 5.0, 6.0], requires_grad=True)
-
-# Operations
-z = x + y
-z.backward()
-
-print(x.grad)  # [1.0, 1.0, 1.0]
-```
-
-### Quant Operations
-
-```python
-from quantml import Tensor
-from quantml import time_series
-
-# Price data
-prices = Tensor([100.0, 101.0, 102.0, 103.0, 104.0])
-
-# Exponential Moving Average
-ema_20 = time_series.ema(prices, n=20)
-
-# Rolling volatility
-vol = time_series.volatility(prices, n=20)
-
-# Returns
-rets = time_series.returns(prices)
-
-# VWAP
-volumes = Tensor([100.0, 110.0, 105.0, 120.0, 115.0])
-vwap = time_series.vwap(prices, volumes)
-```
-
-### Alpha Generation Example
-
-```python
-from quantml import Tensor
-from quantml.models import Linear
-from quantml.optim import QuantOptimizer, StepLR
-from quantml.training import (
-    QuantTrainer, FeaturePipeline, WalkForwardOptimizer, WindowType,
-    AlphaEvaluator, BacktestEngine, GradientNormClipper
-)
-from quantml.training.losses import sharpe_loss
-
-# 1. Create features
-pipeline = FeaturePipeline()
-pipeline.add_lagged_feature('price', lags=[1, 5, 10, 20])
-pipeline.add_rolling_feature('price', window=20, func='mean')
-features = pipeline.transform({'price': prices})
-
-# 2. Create model
-model = Linear(in_features=len(features[0]), out_features=1)
-
-# 3. Setup optimizer with scheduler
-optimizer = QuantOptimizer(model.parameters(), lr=0.001)
-scheduler = StepLR(optimizer, step_size=100, gamma=0.9)
-
-# 4. Train with gradient clipping
-grad_clipper = GradientNormClipper(max_norm=1.0)
-trainer = QuantTrainer(
-    model=model,
-    optimizer=optimizer,
-    loss_fn=sharpe_loss,
-    gradient_clipper=grad_clipper
-)
-
-# 5. Walk-forward training
-wfo = WalkForwardOptimizer(
-    window_type=WindowType.EXPANDING,
-    train_size=500,
-    test_size=100
-)
-
-for train_idx, test_idx in wfo.split(features, n_splits=5):
-    # Train on train_idx, evaluate on test_idx
-    # ... training code ...
-    pass
-
-# 6. Evaluate alpha
-evaluator = AlphaEvaluator(predictions, actuals)
-metrics = evaluator.evaluate()
-print(f"IC: {metrics['ic']:.4f}, Rank IC: {metrics['rank_ic']:.4f}")
-
-# 7. Backtest
-backtest = BacktestEngine(initial_capital=100000.0)
-results = backtest.run_with_predictions(predictions, prices)
-print(f"Sharpe: {results['sharpe_ratio']:.4f}")
-```
-
-### Advanced Training Features
-
-```python
-from quantml.optim import RAdam, Lookahead, CosineAnnealingLR
-from quantml.training import LRFinder, EnsembleModel, Dropout
-
-# Learning rate finder
-lr_finder = LRFinder(model, optimizer, loss_fn)
-lrs, losses = lr_finder.range_test(x_sample, y_sample)
-optimal_lr = lr_finder.suggest_lr()
-
-# Model ensembling
-ensemble = EnsembleModel(
-    models=[model1, model2, model3],
-    weights=[0.4, 0.3, 0.3],
-    strategy='weighted_avg'
-)
-
-# Dropout regularization
-dropout = Dropout(p=0.5)
-x_dropped = dropout.forward(x)
-```
-
 ## Architecture
 
 ```
@@ -221,6 +389,13 @@ quantml/
 ├── time_series.py         # Quant-specific operations
 ├── streaming.py           # Streaming tensors with ring buffer
 ├── online.py              # Online learning utilities
+├── config/                # Configuration management
+│   └── config.py          # YAML/JSON config support
+├── data/                  # Data management
+│   ├── validators.py      # Data validation
+│   ├── loaders.py         # Data loaders
+│   ├── feature_store.py   # Feature caching (Parquet)
+│   └── memory_optimizer.py # Memory optimization
 ├── models/                # Neural network models
 │   ├── linear.py
 │   ├── rnn.py
@@ -228,13 +403,7 @@ quantml/
 ├── optim/                 # Optimizers and schedulers
 │   ├── sgd.py
 │   ├── adam.py
-│   ├── rmsprop.py
-│   ├── adagrad.py
-│   ├── adafactor.py
-│   ├── lookahead.py
-│   ├── radam.py
-│   ├── quant_optimizer.py
-│   └── schedulers.py
+│   └── ... (8 optimizers total)
 ├── training/              # Training utilities
 │   ├── trainer.py
 │   ├── losses.py
@@ -242,17 +411,13 @@ quantml/
 │   ├── features.py
 │   ├── walk_forward.py
 │   ├── backtest.py
-│   ├── alpha_eval.py
-│   ├── gradient_clipping.py
-│   ├── lr_finder.py
-│   ├── ensemble.py
-│   ├── feature_importance.py
-│   ├── cv.py
-│   ├── regularization.py
-│   └── data_loader.py
+│   └── ... (15+ modules)
+├── experiments/           # Experiment tracking
+│   └── ...
 └── utils/                 # Utilities
-    ├── profiling.py
-    └── ops_cpu.py
+    ├── logging.py
+    ├── reproducibility.py
+    └── profiling.py
 ```
 
 ## Performance
@@ -266,12 +431,22 @@ With NumPy optimization:
 ## Examples
 
 See the `examples/` directory for complete examples:
-- `alpha_training.py`: Complete alpha generation pipeline
-- `walk_forward_training.py`: Walk-forward optimization example
-- `backtest_strategy.py`: Strategy backtesting
-- `online_regression.py`: Online learning with streaming data
-- `streaming_training.py`: Per-tick model updates
-- `futures_model.py`: Complete futures trading pipeline
+
+- **`quick_alpha.py`**: Generate alpha signals immediately
+- **`alpha_training.py`**: Complete alpha generation pipeline
+- **`production_alpha.py`**: Production-ready pipeline with walk-forward
+- **`walk_forward_training.py`**: Walk-forward optimization example
+- **`backtest_strategy.py`**: Strategy backtesting
+- **`futures_model.py`**: Complete futures trading pipeline
+- **`online_regression.py`**: Online learning with streaming data
+- **`streaming_training.py`**: Per-tick model updates
+- **`live_alpha_generator.py`**: Real-time alpha generation
+
+## Documentation
+
+- **`ALPHA_GUIDE.md`**: Complete guide to generating alpha
+- **`examples/config_example.yaml`**: Configuration file example
+- **API Documentation**: See docstrings in each module
 
 ## Design Philosophy
 
@@ -281,6 +456,7 @@ See the `examples/` directory for complete examples:
 4. **Streaming Native**: Built for tick-level data from the ground up
 5. **Low Latency**: CPU-optimized for fast inference
 6. **Performance**: NumPy-optimized operations throughout
+7. **Reproducible**: Random seed management, experiment tracking, version control
 
 ## Comparison to PyTorch/JAX
 
@@ -303,6 +479,8 @@ QuantML is designed specifically for quant trading use cases:
 4. **Strategy Backtesting**: Test trading strategies with realistic costs
 5. **Feature Engineering**: Create reproducible quant features
 6. **Model Ensembling**: Combine multiple models for robust predictions
+7. **Futures Trading**: Overnight gap prediction, multi-instrument support
+8. **Research**: Reproducible experiments for academic papers
 
 ## Contributing
 

@@ -1,0 +1,86 @@
+# Overnight Gap Prediction Experiment
+# Predicts overnight gap closure using ML
+
+name: "overnight_gap_prediction"
+description: "Predict overnight gap closure for futures contracts"
+
+random_seed: 42
+
+data:
+  instrument: "ES"  # Can be changed to MES, NQ, MNQ
+  start_date: "2015-01-01"
+  end_date: "2024-12-31"
+  data_source: "csv"
+  data_path: "./data/futures_data.csv"
+  frequency: "1min"
+  validate_data: true
+  handle_missing: "forward_fill"
+  cache_features: true
+  feature_cache_path: "./cache/features"
+
+features:
+  enabled_features:
+    - "lagged_price"
+    - "rolling_mean"
+    - "rolling_std"
+    - "returns"
+    - "volatility"
+    - "momentum"
+    - "mean_reversion"
+  
+  lag_periods: [1, 5, 10, 20, 50]
+  rolling_windows: [20, 50, 100]
+  
+  normalize: true
+  normalization_method: "zscore"
+  
+  alpha_factors:
+    momentum:
+      enabled: true
+      lookback: 20
+    mean_reversion:
+      enabled: true
+      window: 20
+    volatility:
+      enabled: true
+      window: 20
+
+model:
+  model_type: "Linear"
+  in_features: 10  # Auto-calculated from features
+  out_features: 1
+  hidden_size: null
+  bias: true
+  dropout: 0.0
+  activation: null
+
+training:
+  optimizer: "Adam"
+  learning_rate: 0.001
+  batch_size: 32
+  epochs: 100
+  loss_function: "sharpe_loss"  # Optimize for Sharpe ratio
+  
+  early_stopping:
+    enabled: true
+    patience: 10
+    min_delta: 0.0001
+  
+  gradient_clipping:
+    enabled: true
+    max_norm: 1.0
+  
+  scheduler:
+    type: "StepLR"
+    step_size: 50
+    gamma: 0.9
+  
+  walk_forward:
+    enabled: true
+    train_size: 500  # ~2 years of daily data
+    test_size: 100   # ~5 months
+    window_type: "expanding"
+
+output_dir: "./experiments/overnight_gap"
+log_level: "INFO"
+

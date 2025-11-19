@@ -1,0 +1,55 @@
+# MNQ (Micro E-mini NASDAQ-100) Specific Configuration
+
+name: "MNQ_experiment"
+description: "Micro E-mini NASDAQ-100 futures trading"
+
+random_seed: 42
+
+data:
+  instrument: "MNQ"
+  start_date: "2020-01-01"
+  end_date: "2024-12-31"
+  data_source: "csv"
+  data_path: "./data/MNQ_data.csv"
+  frequency: "1min"
+  validate_data: true
+  handle_missing: "forward_fill"
+  cache_features: true
+  feature_cache_path: "./cache/features/MNQ"
+
+features:
+  enabled_features:
+    - "lagged_price"
+    - "rolling_mean"
+    - "rolling_std"
+    - "returns"
+    - "volatility"
+  
+  lag_periods: [1, 5, 10, 20]
+  rolling_windows: [20, 50]
+  
+  normalize: true
+  normalization_method: "zscore"
+
+model:
+  model_type: "Linear"
+  in_features: 10
+  out_features: 1
+  bias: true
+
+training:
+  optimizer: "Adam"
+  learning_rate: 0.001
+  batch_size: 32
+  epochs: 50
+  loss_function: "mse_loss"
+  
+  walk_forward:
+    enabled: true
+    train_size: 500
+    test_size: 100
+    window_type: "expanding"
+
+output_dir: "./experiments/MNQ"
+log_level: "INFO"
+

@@ -147,10 +147,66 @@ class BacktestEngine:
         calmar = calmar_ratio(returns) if returns else 0.0
         max_dd = max_drawdown(returns) if returns else 0.0
         
+        # Calculate trade-level P&L
+        completed_trades = []
+        open_trade = None
+        
+        for i, trade in enumerate(trades):
+            if open_trade is None:
+                # Open new trade
+                open_trade = {
+                    'entry_index': trade['index'],
+                    'entry_price': trade['execution_price'],
+                    'entry_size': trade['size'],
+                    'direction': 1 if trade['size'] > 0 else -1
+                }
+            else:
+                # Check if trade closes position
+                if (open_trade['direction'] > 0 and trade['size'] < 0) or \
+                   (open_trade['direction'] < 0 and trade['size'] > 0):
+                    # Close trade
+                    exit_price = trade['execution_price']
+                    exit_size = abs(trade['size'])
+                    entry_size = abs(open_trade['entry_size'])
+                    
+                    # Calculate P&L
+                    if open_trade['direction'] > 0:  # Long
+                        pnl = (exit_price - open_trade['entry_price']) * min(entry_size, exit_size)
+                    else:  # Short
+                        pnl = (open_trade['entry_price'] - exit_price) * min(entry_size, exit_size)
+                    
+                    pnl -= trade['cost']  # Subtract exit cost
+                    
+                    completed_trades.append({
+                        'entry_index': open_trade['entry_index'],
+                        'exit_index': trade['index'],
+                        'entry_price': open_trade['entry_price'],
+                        'exit_price': exit_price,
+                        'size': min(entry_size, exit_size),
+                        'direction': open_trade['direction'],
+                        'pnl': pnl,
+                        'duration': trade['index'] - open_trade['entry_index'],
+                        'return_pct': pnl / (open_trade['entry_price'] * min(entry_size, exit_size)) if open_trade['entry_price'] > 0 else 0.0
+                    })
+                    
+                    # Update open trade if partial close
+                    if exit_size < entry_size:
+                        open_trade['entry_size'] = open_trade['entry_size'] - (exit_size if open_trade['direction'] > 0 else -exit_size)
+                    else:
+                        open_trade = None
+        
         # Trade statistics
         n_trades = len(trades)
-        winning_trades = sum(1 for t in trades if t.get('pnl', 0) > 0)
-        win_rate = winning_trades / n_trades if n_trades > 0 else 0.0
+        n_completed_trades = len(completed_trades)
+        winning_trades = [t for t in completed_trades if t['pnl'] > 0]
+        losing_trades = [t for t in completed_trades if t['pnl'] <= 0]
+        
+        win_rate = len(winning_trades) / n_completed_trades if n_completed_trades > 0 else 0.0
+        avg_win = sum(t['pnl'] for t in winning_trades) / len(winning_trades) if winning_trades else 0.0
+        avg_loss = sum(t['pnl'] for t in losing_trades) / len(losing_trades) if losing_trades else 0.0
+        profit_factor = abs(sum(t['pnl'] for t in winning_trades) / sum(t['pnl'] for t in losing_trades)) if losing_trades and sum(t['pnl'] for t in losing_trades) != 0 else float('inf') if winning_trades else 0.0
+        
+        avg_duration = sum(t['duration'] for t in completed_trades) / n_completed_trades if n_completed_trades > 0 else 0.0
         
         return {
             'initial_capital': self.initial_capital,
@@ -159,8 +215,14 @@ class BacktestEngine:
             'equity_curve': equity_curve,
             'returns': returns,
             'trades': trades,
+            'completed_trades': completed_trades,
             'n_trades': n_trades,
+            'n_completed_trades': n_completed_trades,
             'win_rate': win_rate,
+            'avg_win': avg_win,
+            'avg_loss': avg_loss,
+            'profit_factor': profit_factor,
+            'avg_duration': avg_duration,
             'sharpe_ratio': sharpe,
             'sortino_ratio': sortino,
             'calmar_ratio': calmar,

@@ -1,0 +1,81 @@
+# Base Configuration Template
+# Copy and modify this for your experiments
+
+name: "base_experiment"
+description: "Base configuration template"
+
+random_seed: 42
+
+data:
+  instrument: "ES"  # ES, MES, NQ, MNQ, etc.
+  start_date: "2020-01-01"
+  end_date: "2024-12-31"
+  data_source: "csv"
+  data_path: "./data/futures_data.csv"
+  frequency: "1min"
+  validate_data: true
+  handle_missing: "forward_fill"
+  cache_features: true
+  feature_cache_path: "./cache/features"
+
+features:
+  enabled_features:
+    - "lagged_price"
+    - "rolling_mean"
+    - "rolling_std"
+    - "returns"
+    - "volatility"
+  
+  lag_periods: [1, 5, 10, 20]
+  rolling_windows: [20, 50]
+  
+  normalize: true
+  normalization_method: "zscore"
+  
+  alpha_factors:
+    momentum:
+      enabled: false
+      lookback: 20
+    mean_reversion:
+      enabled: false
+      window: 20
+    volatility:
+      enabled: false
+      window: 20
+
+model:
+  model_type: "Linear"
+  in_features: 10  # Auto-calculated
+  out_features: 1
+  hidden_size: null
+  bias: true
+  dropout: 0.0
+  activation: null
+
+training:
+  optimizer: "Adam"
+  learning_rate: 0.001
+  batch_size: 32
+  epochs: 50
+  loss_function: "mse_loss"
+  
+  early_stopping:
+    enabled: true
+    patience: 10
+    min_delta: 0.0001
+  
+  gradient_clipping:
+    enabled: false
+    max_norm: 1.0
+  
+  scheduler: null
+  
+  walk_forward:
+    enabled: true
+    train_size: 500
+    test_size: 100
+    window_type: "expanding"
+
+output_dir: "./experiments/base_experiment"
+log_level: "INFO"
+

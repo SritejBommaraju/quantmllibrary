@@ -7,8 +7,17 @@ essential for optimizing quant trading systems.
 
 import time
 import functools
-from typing import Callable, Any, Optional
+import sys
+from typing import Callable, Any, Optional, Dict, List
 from collections import defaultdict
+
+# Try to import psutil for memory tracking
+try:
+    import psutil
+    HAS_PSUTIL = True
+except ImportError:
+    HAS_PSUTIL = False
+    psutil = None
 
 
 def timing(func: Callable) -> Callable:
@@ -187,5 +196,169 @@ def benchmark(func: Callable, n_iterations: int = 100, *args, **kwargs) -> dict:
         'p95': sorted(latencies)[int(len(latencies) * 0.95)],
         'p99': sorted(latencies)[int(len(latencies) * 0.99)],
         'count': len(latencies)
+    }
+
+
+def get_memory_usage() -> Dict[str, float]:
+    """
+    Get current memory usage.
+    
+    Returns:
+        Dictionary with memory usage in MB
+    """
+    if HAS_PSUTIL:
+        process = psutil.Process()
+        mem_info = process.memory_info()
+        return {
+            'rss_mb': mem_info.rss / 1024 / 1024,  # Resident Set Size
+            'vms_mb': mem_info.vms / 1024 / 1024,  # Virtual Memory Size
+            'percent': process.memory_percent()
+        }
+    else:
+        # Fallback using sys
+        try:
+            import resource
+            mem_mb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024
+            return {'rss_mb': mem_mb, 'vms_mb': 0.0, 'percent': 0.0}
+        except (ImportError, AttributeError):
+            return {'rss_mb': 0.0, 'vms_mb': 0.0, 'percent': 0.0}
+
+
+class PipelineProfiler:
+    """
+    Profiler for entire pipeline (data loading, feature generation, training).
+    
+    Tracks timing and memory usage for each stage.
+    """
+    
+    def __init__(self):
+        """Initialize pipeline profiler."""
+        self.stages = {}
+        self.memory_snapshots = []
+    
+    def start_stage(self, stage_name: str):
+        """Start timing a stage."""
+        self.stages[stage_name] = {
+            'start_time': time.perf_counter(),
+            'start_memory': get_memory_usage()
+        }
+    
+    def end_stage(self, stage_name: str):
+        """End timing a stage."""
+        if stage_name not in self.stages:
+            return
+        
+        end_time = time.perf_counter()
+        end_memory = get_memory_usage()
+        
+        start_info = self.stages[stage_name]
+        duration = end_time - start_info['start_time']
+        
+        memory_delta = {
+            'rss_mb': end_memory['rss_mb'] - start_info['start_memory']['rss_mb'],
+            'vms_mb': end_memory['vms_mb'] - start_info['start_memory']['vms_mb']
+        }
+        
+        self.stages[stage_name] = {
+            'duration': duration,
+            'memory_delta': memory_delta,
+            'peak_memory': end_memory
+        }
+    
+    def get_report(self) -> Dict[str, Any]:
+        """Get profiling report."""
+        total_time = sum(s.get('duration', 0) for s in self.stages.values())
+        
+        return {
+            'stages': self.stages,
+            'total_time': total_time,
+            'bottleneck': self._identify_bottleneck()
+        }
+    
+    def _identify_bottleneck(self) -> Optional[str]:
+        """Identify the slowest stage."""
+        if not self.stages:
+            return None
+        
+        max_duration = 0
+        bottleneck = None
+        
+        for stage_name, info in self.stages.items():
+            duration = info.get('duration', 0)
+            if duration > max_duration:
+                max_duration = duration
+                bottleneck = stage_name
+        
+        return bottleneck
+    
+    def print_report(self):
+        """Print profiling report."""
+        report = self.get_report()
+        
+        print("\n" + "=" * 70)
+        print("Pipeline Profiling Report")
+        print("=" * 70)
+        
+        for stage_name, info in report['stages'].items():
+            duration = info.get('duration', 0)
+            memory_delta = info.get('memory_delta', {})
+            
+            print(f"\n{stage_name}:")
+            print(f"  Duration: {duration:.4f} seconds ({duration*1000:.2f} ms)")
+            print(f"  Memory Delta: {memory_delta.get('rss_mb', 0):.2f} MB")
+        
+        print(f"\nTotal Time: {report['total_time']:.4f} seconds")
+        if report['bottleneck']:
+            print(f"Bottleneck: {report['bottleneck']} ({report['stages'][report['bottleneck']]['duration']:.4f}s)")
+        print("=" * 70 + "\n")
+
+
+def profile_training_loop(
+    trainer,
+    n_epochs: int,
+    log_interval: int = 10
+) -> Dict[str, Any]:
+    """
+    Profile a training loop.
+    
+    Args:
+        trainer: Trainer instance
+        n_epochs: Number of epochs
+        log_interval: Log every N epochs
+    
+    Returns:
+        Training profile dictionary
+    """
+    profiler = PipelineProfiler()
+    epoch_times = []
+    
+    profiler.start_stage('total_training')
+    
+    for epoch in range(n_epochs):
+        epoch_start = time.perf_counter()
+        
+        # Train epoch (assuming trainer has train_epoch method)
+        if hasattr(trainer, 'train_epoch'):
+            trainer.train_epoch()
+        else:
+            # Fallback: assume train_step is called externally
+            pass
+        
+        epoch_time = time.perf_counter() - epoch_start
+        epoch_times.append(epoch_time)
+        
+        if (epoch + 1) % log_interval == 0:
+            avg_time = sum(epoch_times[-log_interval:]) / log_interval
+            print(f"Epoch {epoch+1}/{n_epochs}: {avg_time:.4f}s per epoch")
+    
+    profiler.end_stage('total_training')
+    
+    return {
+        'total_time': sum(epoch_times),
+        'avg_epoch_time': sum(epoch_times) / len(epoch_times),
+        'min_epoch_time': min(epoch_times),
+        'max_epoch_time': max(epoch_times),
+        'epoch_times': epoch_times,
+        'memory': get_memory_usage()
     }
 

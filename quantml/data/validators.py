@@ -309,3 +309,82 @@ def generate_data_quality_report(
         quality_score=quality_score
     )
 
+
+def validate_futures_data(
+    prices: List[float],
+    opens: Optional[List[float]] = None,
+    closes: Optional[List[float]] = None,
+    volumes: Optional[List[float]] = None,
+    timestamps: Optional[List] = None,
+    instrument: str = "ES"
+) -> Tuple[bool, List[str]]:
+    """
+    Validate futures-specific data issues.
+    
+    Args:
+        prices: Price data
+        opens: Opening prices (for gap detection)
+        closes: Closing prices (for gap detection)
+        volumes: Volume data
+        timestamps: Timestamp data
+        instrument: Instrument symbol
+    
+    Returns:
+        Tuple of (is_valid, list of error messages)
+    """
+    errors = []
+    
+    # Basic price validation
+    is_valid, price_errors = validate_price_data(prices, volumes, timestamps)
+    if not is_valid:
+        errors.extend(price_errors)
+    
+    # Check for holiday gaps
+    if opens and closes and len(opens) > 1 and len(closes) > 1:
+        for i in range(1, min(len(opens), len(closes))):
+            if closes[i-1] > 0:
+                gap = abs((opens[i] - closes[i-1]) / closes[i-1])
+                # Large gaps might indicate holiday or data issue
+                if gap > 0.1:  # 10% gap
+                    if timestamps and i < len(timestamps) and i-1 < len(timestamps):
+                        days_diff = (timestamps[i] - timestamps[i-1]).days
+                        if days_diff <= 1:
+                            errors.append(f"Large gap at index {i} ({gap*100:.2f}%) without holiday")
+    
+    # Check for roll dates (volume drops)
+    if volumes and len(volumes) > 1:
+        for i in range(1, len(volumes)):
+            if volumes[i] < volumes[i-1] * 0.2:  # 80% drop
+                errors.append(f"Potential contract roll at index {i} (volume drop)")
+    
+    return len(errors) == 0, errors
+
+
+def validate_roll_dates(
+    roll_indices: List[int],
+    data_length: int
+) -> Tuple[bool, List[str]]:
+    """
+    Validate contract roll dates.
+    
+    Args:
+        roll_indices: List of roll indices
+        data_length: Total data length
+    
+    Returns:
+        Tuple of (is_valid, list of error messages)
+    """
+    errors = []
+    
+    for idx in roll_indices:
+        if idx < 0 or idx >= data_length:
+            errors.append(f"Invalid roll index: {idx} (data length: {data_length})")
+    
+    # Check for too frequent rolls
+    if len(roll_indices) > 1:
+        for i in range(1, len(roll_indices)):
+            if roll_indices[i] - roll_indices[i-1] < 10:
+                errors.append(f"Rolls too frequent: {roll_indices[i-1]} -> {roll_indices[i]}")
+    
+    return len(errors) == 0, errors
+
