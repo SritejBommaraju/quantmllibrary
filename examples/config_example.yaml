@@ -1,0 +1,92 @@
+# QuantML Experiment Configuration Example
+# This file demonstrates how to configure experiments
+
+name: "overnight_gap_prediction"
+description: "Predict overnight gap closure using ML"
+
+# Random seed for reproducibility
+random_seed: 42
+
+# Data configuration
+data:
+  instrument: "ES"  # Options: ES, MES, NQ, MNQ, etc.
+  start_date: "2015-01-01"
+  end_date: "2024-12-31"
+  data_source: "csv"  # csv, database, api
+  data_path: "./data/futures_data.csv"
+  frequency: "1min"  # 1min, 5min, daily
+  validate_data: true
+  handle_missing: "forward_fill"  # forward_fill, drop, interpolate
+  cache_features: true
+  feature_cache_path: "./cache/features"
+
+# Feature engineering configuration
+features:
+  enabled_features:
+    - "lagged_price"
+    - "rolling_mean"
+    - "rolling_std"
+    - "returns"
+    - "volatility"
+    - "momentum"
+    - "mean_reversion"
+  
+  lag_periods: [1, 5, 10, 20, 50]
+  rolling_windows: [20, 50, 100]
+  
+  normalize: true
+  normalization_method: "zscore"  # zscore, minmax, robust
+  
+  alpha_factors:
+    momentum:
+      enabled: true
+      lookback: 20
+    mean_reversion:
+      enabled: true
+      window: 20
+    volatility:
+      enabled: true
+      window: 20
+
+# Model configuration
+model:
+  model_type: "Linear"  # Linear, SimpleRNN, TCN
+  in_features: 10  # Will be auto-calculated from features
+  out_features: 1
+  hidden_size: null  # For RNN/TCN
+  bias: true
+  dropout: 0.0
+  activation: null
+
+# Training configuration
+training:
+  optimizer: "Adam"  # SGD, Adam, RMSProp, AdaGrad, etc.
+  learning_rate: 0.001
+  batch_size: 32
+  epochs: 100
+  loss_function: "sharpe_loss"  # mse_loss, sharpe_loss, quantile_loss
+  
+  early_stopping:
+    enabled: true
+    patience: 10
+    min_delta: 0.0001
+  
+  gradient_clipping:
+    enabled: true
+    max_norm: 1.0
+  
+  scheduler:
+    type: "StepLR"
+    step_size: 50
+    gamma: 0.9
+  
+  walk_forward:
+    enabled: true
+    train_size: 500  # Training window size
+    test_size: 100   # Test window size
+    window_type: "expanding"  # expanding, rolling
+
+# Output configuration
+output_dir: "./experiments/overnight_gap_prediction"
+log_level: "INFO"
+
