@@ -575,6 +575,83 @@ def dot(a: Tensor, b: Tensor) -> Tensor:
     return out
 
 
+
+def transpose(t: Tensor) -> Tensor:
+    """
+    Transpose a 2D tensor.
+    
+    Args:
+        t: Input tensor
+    
+    Returns:
+        Transposed tensor
+    """
+    t = _to_tensor(t)
+    
+    # Use NumPy if available
+    if HAS_NUMPY:
+        try:
+            t_arr = t.numpy if (t.numpy is not None) else _to_numpy(t.data)
+            if t_arr is not None:
+                if t_arr.ndim == 1:
+                    out_arr = t_arr.reshape(1, -1).T
+                elif t_arr.ndim == 2:
+                    out_arr = t_arr.T
+                else:
+                    # Generic transpose for higher dim? default to reverse all dims or just swap last two
+                    out_arr = np.transpose(t_arr) # Reverses dims by default
+                
+                out = _create_tensor_from_numpy(
+                    out_arr,
+                    requires_grad=t.requires_grad,
+                    _prev={t} if t.requires_grad else set(),
+                    _op='transpose'
+                )
+            else:
+                out_data = _transpose_pure_python(t.data)
+                out = Tensor(
+                    out_data,
+                    requires_grad=t.requires_grad,
+                    _prev={t} if t.requires_grad else set(),
+                    _op='transpose'
+                )
+        except (ValueError, TypeError):
+            out_data = _transpose_pure_python(t.data)
+            out = Tensor(
+                out_data,
+                requires_grad=t.requires_grad,
+                _prev={t} if t.requires_grad else set(),
+                _op='transpose'
+            )
+    else:
+        out_data = _transpose_pure_python(t.data)
+        out = Tensor(
+            out_data,
+            requires_grad=t.requires_grad,
+            _prev={t} if t.requires_grad else set(),
+            _op='transpose'
+        )
+    
+    def _backward(grad):
+        if t.requires_grad:
+            # Gradient of transpose is transpose of gradient
+            from quantml.ops import transpose
+            t.backward(transpose(Tensor(grad) if not isinstance(grad, Tensor) else grad).data)
+            
+    if out.requires_grad:
+        out._backward_fn = _backward
+    
+    return out
+
+
+def _transpose_pure_python(data):
+    if not isinstance(data, list):
+        return [[data]]
+    if not isinstance(data[0], list):
+        return [[x] for x in data]
+    return [[data[j][i] for j in range(len(data))] for i in range(len(data[0]))]
+
+
 def sum(t: Tensor, axis: Optional[int] = None) -> Tensor:
     """
     Sum elements of tensor, optionally along an axis.
@@ -780,15 +857,50 @@ def mean(t: Tensor, axis: Optional[int] = None) -> Tensor:
     return div(s, count)
 
 
-def std(t: Tensor, axis: Optional[int] = None) -> Tensor:
-    """Compute standard deviation of tensor elements."""
+def var(t: Tensor, axis: Optional[int] = None, unbiased: bool = True) -> Tensor:
+    """
+    Compute variance of tensor elements.
+    
+    Args:
+        t: Input tensor
+        axis: Axis to compute variance over
+        unbiased: If True, use Bessel's correction (N-1)
+    
+    Returns:
+        Tensor with variance
+    """
     t = _to_tensor(t)
     m = mean(t, axis=axis)
+    
     # Expand mean to match shape for subtraction
+    # If axis is 0 (cols), mean is 1xM, needs to be NxM
+    # If axis is 1 (rows), mean is Nx1, needs to be NxM
+    # Note: simple sub() might not broadcast correctly if shapes don't align perfectly
+    # For now relying on sub's broadcasting or manual reshaping if needed
+    
     diff = sub(t, m)
     diff_sq = mul(diff, diff)
-    var = mean(diff_sq, axis=axis)
-    return pow(var, 0.5)
+    
+    # Sum of squared differences
+    s = sum(diff_sq, axis=axis)
+    
+    # Divide by N or N-1
+    if axis is None:
+        count = len(t.data) * len(t.data[0]) if isinstance(t.data[0], list) else len(t.data)
+    elif axis == 0:
+        count = len(t.data) if isinstance(t.data[0], list) else 1
+    else:
+        count = len(t.data[0]) if isinstance(t.data[0], list) else len(t.data)
+    
+    denom = count - 1 if unbiased and count > 1 else count
+    
+    return div(s, float(denom))
+
+
+def std(t: Tensor, axis: Optional[int] = None, unbiased: bool = True) -> Tensor:
+    """Compute standard deviation of tensor elements."""
+    v = var(t, axis=axis, unbiased=unbiased)
+    return pow(v, 0.5)
 
 
 def relu(t: Tensor) -> Tensor:
@@ -847,6 +959,19 @@ def relu(t: Tensor) -> Tensor:
     
     def _backward(grad):
         if t.requires_grad:
+            if HAS_NUMPY:
+                try:
+                    # Convert to numpy if not already
+                    grad_arr = np.array(grad, dtype=np.float64) if not isinstance(grad, np.ndarray) else grad
+                    t_arr = _to_numpy(t.data)
+                    # Gradient is passed where t > 0
+                    t_grad_arr = np.where(t_arr > 0, grad_arr, 0.0)
+                    t.backward(t_grad_arr)
+                    return
+                except (ValueError, TypeError):
+                    pass
+            
+            # Pure Python fallback
             if isinstance(grad, list) and isinstance(t.data[0], list):
                 t_grad = [[float(grad[i][j]) if float(t.data[i][j]) > 0 else 0.0
                           for j in range(len(grad[i]))] for i in range(len(grad))]
@@ -854,7 +979,7 @@ def relu(t: Tensor) -> Tensor:
                 t_grad = [float(grad[i]) if float(t.data[i]) > 0 else 0.0
                          for i in range(len(grad))]
             else:
-                t_grad = float(grad) if float(t.data[0][0]) > 0 else 0.0
+                t_grad = float(grad) if float(t.data[0][0] if isinstance(t.data, list) else t.data) > 0 else 0.0
             t.backward(t_grad)
     
     if out.requires_grad:
@@ -923,6 +1048,17 @@ def sigmoid(t: Tensor) -> Tensor:
     def _backward(grad):
         if t.requires_grad:
             # d/dx sigmoid(x) = sigmoid(x) * (1 - sigmoid(x))
+            if HAS_NUMPY:
+                try:
+                    grad_arr = np.array(grad, dtype=np.float64) if not isinstance(grad, np.ndarray) else grad
+                    out_arr = _to_numpy(out_data)
+                    t_grad_arr = grad_arr * out_arr * (1.0 - out_arr)
+                    t.backward(t_grad_arr)
+                    return
+                except (ValueError, TypeError):
+                    pass
+            
+            # Pure Python fallback
             if isinstance(grad, list) and isinstance(t.data[0], list):
                 t_grad = [[float(grad[i][j]) * float(out_data[i][j]) * (1.0 - float(out_data[i][j]))
                           for j in range(len(grad[i]))] for i in range(len(grad))]
@@ -930,7 +1066,8 @@ def sigmoid(t: Tensor) -> Tensor:
                 t_grad = [float(grad[i]) * float(out_data[i]) * (1.0 - float(out_data[i]))
                          for i in range(len(grad))]
             else:
-                t_grad = float(grad) * float(out_data[0][0]) * (1.0 - float(out_data[0][0]))
+                s = float(out_data[0][0]) if isinstance(out_data, list) and isinstance(out_data[0], list) else float(out_data[0]) if isinstance(out_data, list) else float(out_data)
+                t_grad = float(grad) * s * (1.0 - s)
             t.backward(t_grad)
     
     if out.requires_grad:
@@ -1124,6 +1261,17 @@ def tanh(t: Tensor) -> Tensor:
     def _backward(grad):
         if t.requires_grad:
             # d/dx tanh(x) = 1 - tanh^2(x)
+            if HAS_NUMPY:
+                try:
+                    grad_arr = np.array(grad, dtype=np.float64) if not isinstance(grad, np.ndarray) else grad
+                    out_arr = _to_numpy(out_data)
+                    t_grad_arr = grad_arr * (1.0 - out_arr ** 2)
+                    t.backward(t_grad_arr)
+                    return
+                except (ValueError, TypeError):
+                    pass
+            
+            # Pure Python fallback
             if isinstance(grad, list) and isinstance(t.data[0], list):
                 t_grad = [[float(grad[i][j]) * (1.0 - float(out_data[i][j]) ** 2)
                           for j in range(len(grad[i]))] for i in range(len(grad))]
@@ -1131,11 +1279,429 @@ def tanh(t: Tensor) -> Tensor:
                 t_grad = [float(grad[i]) * (1.0 - float(out_data[i]) ** 2)
                          for i in range(len(grad))]
             else:
-                t_grad = float(grad) * (1.0 - float(out_data[0][0]) ** 2)
+                s = float(out_data[0][0]) if isinstance(out_data, list) and isinstance(out_data[0], list) else float(out_data[0]) if isinstance(out_data, list) else float(out_data)
+                t_grad = float(grad) * (1.0 - s ** 2)
             t.backward(t_grad)
     
     if out.requires_grad:
         out._backward_fn = _backward
     
     return out
+
+
+def softmax(t: Tensor, axis: int = -1) -> Tensor:
+    """
+    Softmax activation function: exp(x) / sum(exp(x))
+    
+    Normalizes values to probabilities that sum to 1.
+    
+    Args:
+        t: Input tensor
+        axis: Axis along which to compute softmax (default: -1, last axis)
+    
+    Returns:
+        Tensor with softmax applied
+    
+    Examples:
+        >>> x = Tensor([[1.0, 2.0, 3.0]])
+        >>> y = softmax(x)  # Probabilities summing to 1
+    """
+    t = _to_tensor(t)
+    
+    # Use NumPy if available
+    if HAS_NUMPY:
+        try:
+            t_arr = _to_numpy(t.data)
+            if t_arr is not None:
+                # Numerically stable softmax
+                t_max = np.max(t_arr, axis=axis, keepdims=True)
+                exp_arr = np.exp(t_arr - t_max)
+                out_arr = exp_arr / np.sum(exp_arr, axis=axis, keepdims=True)
+                out_data = out_arr.tolist()
+            else:
+                # Fallback to pure Python
+                out_data = _softmax_pure_python(t.data, axis)
+        except (ValueError, TypeError):
+            out_data = _softmax_pure_python(t.data, axis)
+    else:
+        out_data = _softmax_pure_python(t.data, axis)
+    
+    out = Tensor(
+        out_data,
+        requires_grad=t.requires_grad,
+        _prev={t} if t.requires_grad else set(),
+        _op='softmax'
+    )
+    
+    def _backward(grad):
+        if t.requires_grad:
+            # Jacobian-vector product for softmax
+            if HAS_NUMPY:
+                try:
+                    grad_arr = np.array(grad, dtype=np.float64) if not isinstance(grad, np.ndarray) else grad
+                    s = _to_numpy(out_data)
+                    
+                    # optimized implementation: s * (g - sum(s*g))
+                    # sum(s*g) along axis
+                    sg_dot = np.sum(s * grad_arr, axis=axis, keepdims=True)
+                    t_grad_arr = s * (grad_arr - sg_dot)
+                    t.backward(t_grad_arr)
+                    return
+                except (ValueError, TypeError):
+                    pass
+
+            # Pure Python fallback
+            if isinstance(grad, list) and isinstance(t.data[0], list):
+                t_grad = []
+                for i in range(len(grad)):
+                    row_grad = []
+                    s = out_data[i]  # softmax output
+                    g = grad[i]  # upstream gradient
+                    # Sum over all k: s[j] * (delta_jk - s[k]) * g[k]
+                    dot_sg = sum(float(s[k]) * float(g[k]) for k in range(len(s)))
+                    for j in range(len(g)):
+                        row_grad.append(float(s[j]) * (float(g[j]) - dot_sg))
+                    t_grad.append(row_grad)
+            elif isinstance(grad, list):
+                s = out_data
+                g = grad
+                dot_sg = sum(float(s[k]) * float(g[k]) for k in range(len(s)))
+                t_grad = [float(s[j]) * (float(g[j]) - dot_sg) for j in range(len(g))]
+            else:
+                t_grad = grad
+            t.backward(t_grad)
+    
+    if out.requires_grad:
+        out._backward_fn = _backward
+    
+    return out
+
+
+def _softmax_pure_python(data, axis=-1):
+    """Pure Python softmax implementation."""
+    import math
+    
+    if isinstance(data[0], list):
+        # 2D case
+        if axis == -1 or axis == 1:
+            result = []
+            for row in data:
+                max_val = max(float(x) for x in row)
+                exp_vals = [math.exp(float(x) - max_val) for x in row]
+                sum_exp = sum(exp_vals)
+                result.append([e / sum_exp for e in exp_vals])
+            return result
+        else:  # axis == 0
+            # Transpose, apply, transpose back
+            cols = len(data[0])
+            rows = len(data)
+            result = [[0.0] * cols for _ in range(rows)]
+            for j in range(cols):
+                col = [float(data[i][j]) for i in range(rows)]
+                max_val = max(col)
+                exp_vals = [math.exp(x - max_val) for x in col]
+                sum_exp = sum(exp_vals)
+                for i in range(rows):
+                    result[i][j] = exp_vals[i] / sum_exp
+            return result
+    else:
+        # 1D case
+        max_val = max(float(x) for x in data)
+        exp_vals = [math.exp(float(x) - max_val) for x in data]
+        sum_exp = sum(exp_vals)
+        return [e / sum_exp for e in exp_vals]
+
+
+def leaky_relu(t: Tensor, negative_slope: float = 0.01) -> Tensor:
+    """
+    Leaky ReLU activation function: max(0, x) + negative_slope * min(0, x)
+    
+    Args:
+        t: Input tensor
+        negative_slope: Slope for negative values (default: 0.01)
+    
+    Returns:
+        Tensor with Leaky ReLU applied
+    
+    Examples:
+        >>> x = Tensor([[-1.0, 0.0, 1.0]])
+        >>> y = leaky_relu(x, negative_slope=0.1)  # [[-0.1, 0.0, 1.0]]
+    """
+    t = _to_tensor(t)
+    
+    if HAS_NUMPY:
+        try:
+            t_arr = _to_numpy(t.data)
+            if t_arr is not None:
+                out_arr = np.where(t_arr > 0, t_arr, negative_slope * t_arr)
+                out_data = out_arr.tolist()
+            else:
+                out_data = _leaky_relu_pure_python(t.data, negative_slope)
+        except (ValueError, TypeError):
+            out_data = _leaky_relu_pure_python(t.data, negative_slope)
+    else:
+        out_data = _leaky_relu_pure_python(t.data, negative_slope)
+    
+    out = Tensor(
+        out_data,
+        requires_grad=t.requires_grad,
+        _prev={t} if t.requires_grad else set(),
+        _op='leaky_relu'
+    )
+    
+    def _backward(grad):
+        if t.requires_grad:
+            if HAS_NUMPY:
+                try:
+                    grad_arr = np.array(grad, dtype=np.float64) if not isinstance(grad, np.ndarray) else grad
+                    t_arr = _to_numpy(t.data)
+                    t_grad_arr = np.where(t_arr > 0, grad_arr, grad_arr * negative_slope)
+                    t.backward(t_grad_arr)
+                    return
+                except (ValueError, TypeError):
+                    pass
+            
+            # Pure Python fallback
+            if isinstance(grad, list) and isinstance(t.data[0], list):
+                t_grad = [[float(grad[i][j]) if float(t.data[i][j]) > 0 
+                          else float(grad[i][j]) * negative_slope
+                          for j in range(len(grad[i]))] for i in range(len(grad))]
+            elif isinstance(grad, list):
+                t_grad = [float(grad[i]) if float(t.data[i]) > 0 
+                         else float(grad[i]) * negative_slope
+                         for i in range(len(grad))]
+            else:
+                val = float(t.data[0][0]) if isinstance(t.data, list) and isinstance(t.data[0], list) else float(t.data[0]) if isinstance(t.data, list) else float(t.data)
+                g_val = float(grad)
+                t_grad = g_val if val > 0 else g_val * negative_slope
+            t.backward(t_grad)
+    
+    if out.requires_grad:
+        out._backward_fn = _backward
+    
+    return out
+
+
+def _leaky_relu_pure_python(data, negative_slope):
+    """Pure Python Leaky ReLU implementation."""
+    if isinstance(data[0], list):
+        return [[float(x) if float(x) > 0 else negative_slope * float(x) 
+                for x in row] for row in data]
+    else:
+        return [float(x) if float(x) > 0 else negative_slope * float(x) 
+               for x in data]
+
+
+def gelu(t: Tensor) -> Tensor:
+    """
+    Gaussian Error Linear Unit (GELU) activation function.
+    
+    GELU(x) = x * Φ(x) where Φ is the CDF of the standard normal distribution.
+    Approximation: 0.5 * x * (1 + tanh(sqrt(2/π) * (x + 0.044715 * x^3)))
+    
+    Popular in Transformer models.
+    
+    Args:
+        t: Input tensor
+    
+    Returns:
+        Tensor with GELU applied
+    
+    Examples:
+        >>> x = Tensor([[0.0, 1.0, 2.0]])
+        >>> y = gelu(x)
+    """
+    t = _to_tensor(t)
+    import math
+    sqrt_2_over_pi = math.sqrt(2.0 / math.pi)
+    
+    if HAS_NUMPY:
+        try:
+            t_arr = _to_numpy(t.data)
+            if t_arr is not None:
+                inner = sqrt_2_over_pi * (t_arr + 0.044715 * t_arr ** 3)
+                out_arr = 0.5 * t_arr * (1.0 + np.tanh(inner))
+                out_data = out_arr.tolist()
+            else:
+                out_data = _gelu_pure_python(t.data, sqrt_2_over_pi)
+        except (ValueError, TypeError):
+            out_data = _gelu_pure_python(t.data, sqrt_2_over_pi)
+    else:
+        out_data = _gelu_pure_python(t.data, sqrt_2_over_pi)
+    
+    out = Tensor(
+        out_data,
+        requires_grad=t.requires_grad,
+        _prev={t} if t.requires_grad else set(),
+        _op='gelu'
+    )
+    
+    def _backward(grad):
+        if t.requires_grad:
+            if HAS_NUMPY:
+                try:
+                    grad_arr = np.array(grad, dtype=np.float64) if not isinstance(grad, np.ndarray) else grad
+                    x = _to_numpy(t.data)
+                    inner = sqrt_2_over_pi * (x + 0.044715 * x ** 3)
+                    tanh_inner = np.tanh(inner)
+                    sech2_inner = 1.0 - tanh_inner ** 2
+                    d_inner = sqrt_2_over_pi * (1.0 + 0.134145 * x ** 2)
+                    d_gelu = 0.5 * (1.0 + tanh_inner) + 0.5 * x * sech2_inner * d_inner
+                    t_grad_arr = grad_arr * d_gelu
+                    t.backward(t_grad_arr)
+                    return
+                except (ValueError, TypeError):
+                    pass
+            
+            # Pure Python fallback
+            # GELU derivative (using approximation)
+            # d/dx GELU(x) = 0.5 * (1 + tanh(inner)) + 0.5 * x * sech^2(inner) * d_inner/dx
+            if isinstance(grad, list) and isinstance(t.data[0], list):
+                t_grad = []
+                for i in range(len(grad)):
+                    row_grad = []
+                    for j in range(len(grad[i])):
+                        x = float(t.data[i][j])
+                        inner = sqrt_2_over_pi * (x + 0.044715 * x ** 3)
+                        tanh_inner = math.tanh(inner)
+                        sech2_inner = 1.0 - tanh_inner ** 2
+                        d_inner = sqrt_2_over_pi * (1.0 + 0.134145 * x ** 2)
+                        d_gelu = 0.5 * (1.0 + tanh_inner) + 0.5 * x * sech2_inner * d_inner
+                        row_grad.append(float(grad[i][j]) * d_gelu)
+                    t_grad.append(row_grad)
+            elif isinstance(grad, list):
+                t_grad = []
+                for i in range(len(grad)):
+                    x = float(t.data[i])
+                    inner = sqrt_2_over_pi * (x + 0.044715 * x ** 3)
+                    tanh_inner = math.tanh(inner)
+                    sech2_inner = 1.0 - tanh_inner ** 2
+                    d_inner = sqrt_2_over_pi * (1.0 + 0.134145 * x ** 2)
+                    d_gelu = 0.5 * (1.0 + tanh_inner) + 0.5 * x * sech2_inner * d_inner
+                    t_grad.append(float(grad[i]) * d_gelu)
+            else:
+                x = float(t.data[0][0] if isinstance(t.data, list) and isinstance(t.data[0], list) else t.data[0] if isinstance(t.data, list) else t.data)
+                g_val = float(grad)
+                inner = sqrt_2_over_pi * (x + 0.044715 * x ** 3)
+                tanh_inner = math.tanh(inner)
+                sech2_inner = 1.0 - tanh_inner ** 2
+                d_inner = sqrt_2_over_pi * (1.0 + 0.134145 * x ** 2)
+                d_gelu = 0.5 * (1.0 + tanh_inner) + 0.5 * x * sech2_inner * d_inner
+                t_grad = g_val * d_gelu
+            t.backward(t_grad)
+    
+    if out.requires_grad:
+        out._backward_fn = _backward
+    
+    return out
+
+
+def _gelu_pure_python(data, sqrt_2_over_pi):
+    """Pure Python GELU implementation."""
+    import math
+    
+    def _gelu_element(x):
+        x = float(x)
+        inner = sqrt_2_over_pi * (x + 0.044715 * x ** 3)
+        return 0.5 * x * (1.0 + math.tanh(inner))
+    
+    if isinstance(data[0], list):
+        return [[_gelu_element(x) for x in row] for row in data]
+    else:
+        return [_gelu_element(x) for x in data]
+
+
+def swish(t: Tensor, beta: float = 1.0) -> Tensor:
+    """
+    Swish activation function: x * sigmoid(beta * x)
+    
+    Also known as SiLU (Sigmoid Linear Unit) when beta=1.
+    Self-gated activation that sometimes outperforms ReLU.
+    
+    Args:
+        t: Input tensor
+        beta: Scaling parameter (default: 1.0)
+    
+    Returns:
+        Tensor with Swish applied
+    
+    Examples:
+        >>> x = Tensor([[0.0, 1.0, 2.0]])
+        >>> y = swish(x)
+    """
+    t = _to_tensor(t)
+    import math
+    
+    if HAS_NUMPY:
+        try:
+            t_arr = _to_numpy(t.data)
+            if t_arr is not None:
+                sig = 1.0 / (1.0 + np.exp(-beta * t_arr))
+                out_arr = t_arr * sig
+                out_data = out_arr.tolist()
+            else:
+                out_data = _swish_pure_python(t.data, beta)
+        except (ValueError, TypeError):
+            out_data = _swish_pure_python(t.data, beta)
+    else:
+        out_data = _swish_pure_python(t.data, beta)
+    
+    out = Tensor(
+        out_data,
+        requires_grad=t.requires_grad,
+        _prev={t} if t.requires_grad else set(),
+        _op='swish'
+    )
+    
+    def _backward(grad):
+        if t.requires_grad:
+            # d/dx swish(x) = swish(x) + sigmoid(beta*x) * (1 - swish(x))
+            # = sigmoid(beta*x) * (1 + beta*x*(1 - sigmoid(beta*x)))
+            if isinstance(grad, list) and isinstance(t.data[0], list):
+                t_grad = []
+                for i in range(len(grad)):
+                    row_grad = []
+                    for j in range(len(grad[i])):
+                        x = float(t.data[i][j])
+                        sig = 1.0 / (1.0 + math.exp(-beta * x))
+                        sw = x * sig
+                        d_swish = sw + sig * (1.0 - sw)
+                        row_grad.append(float(grad[i][j]) * d_swish)
+                    t_grad.append(row_grad)
+            elif isinstance(grad, list):
+                t_grad = []
+                for i in range(len(grad)):
+                    x = float(t.data[i])
+                    sig = 1.0 / (1.0 + math.exp(-beta * x))
+                    sw = x * sig
+                    d_swish = sw + sig * (1.0 - sw)
+                    t_grad.append(float(grad[i]) * d_swish)
+            else:
+                x = float(t.data[0][0])
+                sig = 1.0 / (1.0 + math.exp(-beta * x))
+                sw = x * sig
+                d_swish = sw + sig * (1.0 - sw)
+                t_grad = float(grad) * d_swish
+            t.backward(t_grad)
+    
+    if out.requires_grad:
+        out._backward_fn = _backward
+    
+    return out
+
+
+def _swish_pure_python(data, beta):
+    """Pure Python Swish implementation."""
+    import math
+    
+    def _swish_element(x):
+        x = float(x)
+        sig = 1.0 / (1.0 + math.exp(-beta * x))
+        return x * sig
+    
+    if isinstance(data[0], list):
+        return [[_swish_element(x) for x in row] for row in data]
+    else:
+        return [_swish_element(x) for x in data]
+
 

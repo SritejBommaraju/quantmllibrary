@@ -422,11 +422,18 @@ quantml/
 
 ## Performance
 
-With NumPy optimization:
-- **Training Speed**: 2-5x faster (eliminated conversions)
-- **Memory Usage**: 30-50% reduction (NumPy arrays, fewer Tensor objects)
-- **Inference Latency**: 3-10x faster (optimized operations)
-- **Optimizer Overhead**: 5-10x reduction (direct NumPy operations)
+**Measured Benchmarks** (see `docs/benchmark_results.md` for details):
+
+- **Inference Latency**: 0.02-0.07ms average (sub-millisecond, suitable for HFT)
+- **Training Throughput**: 7,000-14,000 steps/second
+- **Tensor Operations**: 250,000+ ops/sec (100x100 tensors)
+- **Matrix Multiplication**: 2,000-14,000 ops/sec (depending on size)
+
+**Optimization Benefits**:
+- **NumPy-optimized**: Direct array operations eliminate conversion overhead
+- **Memory Efficient**: NumPy arrays reduce memory footprint vs Python lists
+- **Low Latency**: Sub-millisecond inference enables real-time trading
+- **High Throughput**: Optimized training loops for rapid iteration
 
 ## Examples
 

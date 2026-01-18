@@ -51,8 +51,9 @@ Documentation = "https://github.com/quantml/quantml#readme"
 Repository = "https://github.com/quantml/quantml"
 Issues = "https://github.com/quantml/quantml/issues"
 
-[tool.setuptools]
-packages = ["quantml", "quantml.models", "quantml.optim", "quantml.utils"]
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["quantml*"]
 
 [tool.setuptools.package-data]
 quantml = ["py.typed"]

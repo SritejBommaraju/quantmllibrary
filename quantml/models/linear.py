@@ -85,7 +85,7 @@ class Linear:
         # For simplicity, we'll do: (x @ weight.T) which is matmul(x, weight.T)
         
         # Transpose weight: (in_features, out_features)
-        weight_T = self._transpose(self.weight)
+        weight_T = ops.transpose(self.weight)
         
         # Matrix multiply: x @ weight_T
         out = ops.matmul(x, weight_T)
@@ -96,18 +96,6 @@ class Linear:
             out = ops.add(out, self.bias_param)
         
         return out
-    
-    def _transpose(self, t: Tensor) -> Tensor:
-        """Transpose a 2D tensor."""
-        if not isinstance(t.data[0], list):
-            # 1D, make it 2D first
-            data = [t.data]
-        else:
-            data = t.data
-        
-        transposed = [[data[j][i] for j in range(len(data))] 
-                     for i in range(len(data[0]))]
-        return Tensor(transposed, requires_grad=t.requires_grad)
     
     def parameters(self) -> list:
         """Get all trainable parameters."""

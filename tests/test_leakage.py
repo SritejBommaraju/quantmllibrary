@@ -17,7 +17,7 @@ def test_walk_forward_no_leakage():
         test_size=10
     )
     
-    splits = list(wfo.split(data, n_splits=3))
+    splits = list(wfo.get_splits(len(data), n_splits=3))
     
     # Check that test indices are always after train indices
     for train_idx, test_idx in splits:

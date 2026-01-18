@@ -4,7 +4,7 @@ Futures-specific data handling.
 Handles contract rolls, holidays, gaps, and session-based data.
 """
 
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict, Optional, Tuple, Any
 from datetime import datetime, timedelta
 
 

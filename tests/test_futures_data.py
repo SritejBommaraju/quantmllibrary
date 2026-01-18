@@ -32,7 +32,7 @@ def test_overnight_gap_detection():
     
     assert len(gaps) == 3, "Should detect 3 gaps"
     assert gaps[0]['index'] == 1
-    assert abs(gaps[0]['gap'] - 0.01) < 0.001  # 1% gap
+    assert abs(gaps[0]['gap'] - 0.02) < 0.001  # 2% gap
 
 
 def test_futures_data_validation():

@@ -44,7 +44,7 @@ def test_walk_forward_optimizer():
     )
     
     data = list(range(50))
-    splits = list(wfo.split(data, n_splits=3))
+    splits = list(wfo.get_splits(len(data), n_splits=3))
     
     assert len(splits) == 3
     for train_idx, test_idx in splits:
