@@ -101,7 +101,10 @@ class TestSigmoid:
         
         # At x=0, sigmoid=0.5, so gradient = 0.5 * 0.5 = 0.25
         grad = x.grad
-        grad_val = grad[0][0] if isinstance(grad[0], list) else grad[0]
+        if hasattr(grad, 'item'):
+            grad_val = grad.item()
+        else:
+            grad_val = grad[0][0] if isinstance(grad[0], list) else grad[0]
         assert grad_val == pytest.approx(0.25)
 
 
@@ -133,7 +136,10 @@ class TestTanh:
         
         # At x=0, tanh=0, so gradient = 1 - 0 = 1
         grad = x.grad
-        grad_val = grad[0][0] if isinstance(grad[0], list) else grad[0]
+        if hasattr(grad, 'item'):
+            grad_val = grad.item()
+        else:
+            grad_val = grad[0][0] if isinstance(grad[0], list) else grad[0]
         assert grad_val == pytest.approx(1.0)
 
 

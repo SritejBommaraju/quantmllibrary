@@ -8,7 +8,7 @@ def measure_tensor_ops_per_second():
     Measure pure overhead-free tensor operations per second.
     This demonstrates the efficiency of the dispatch engine.
     """
-    N = 100_000
+    N = 200_000
     a = Tensor([1.0], requires_grad=False)
     b = Tensor([2.0], requires_grad=False)
     

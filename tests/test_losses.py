@@ -46,7 +46,10 @@ class TestMSELoss:
         
         # d/d_pred MSE = 2 * (pred - target) / n = 2 * 1 / 1 = 2
         grad = pred.grad
-        grad_val = grad[0][0] if isinstance(grad[0], list) else grad[0]
+        if hasattr(grad, 'item'):
+            grad_val = grad.item()
+        else:
+            grad_val = grad[0][0] if isinstance(grad[0], list) else grad[0]
         assert grad_val == pytest.approx(2.0)
 
 
