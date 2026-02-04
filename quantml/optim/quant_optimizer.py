@@ -71,8 +71,8 @@ class QuantOptimizer:
         self.volatility_window = volatility_window
         self.regime_threshold = regime_threshold
         
-        self.m: Dict[int, Any] = {}  # First moment
-        self.v: Dict[int, Any] = {}  # Second moment
+        self._m: Dict[int, Any] = {}  # First moment
+        self._v: Dict[int, Any] = {}  # Second moment
         self.step_count = 0
         self.volatility_history: List[float] = []
         self.feature_lrs: Dict[int, Any] = {}  # Per-parameter learning rate multipliers
@@ -85,12 +85,12 @@ class QuantOptimizer:
             param: Optional single parameter to update
             market_volatility: Current market volatility (for adaptive LR)
         """
+        self.step_count += 1
         if param is not None:
             self._update_param(param, market_volatility)
         else:
             for p in self.params:
                 self._update_param(p, market_volatility)
-        self.step_count += 1
         
         # Update volatility history
         if market_volatility is not None:
@@ -134,16 +134,16 @@ class QuantOptimizer:
                 
                 param_arr = param.numpy if param.numpy is not None else np.array(param.data, dtype=np.float64)
                 
-                if param_id not in self.m:
-                    self.m[param_id] = np.zeros_like(param_arr, dtype=np.float64)
-                    self.v[param_id] = np.zeros_like(param_arr, dtype=np.float64)
+                if param_id not in self._m:
+                    self._m[param_id] = np.zeros_like(param_arr, dtype=np.float64)
+                    self._v[param_id] = np.zeros_like(param_arr, dtype=np.float64)
                 
                 if self.weight_decay > 0:
                     grad_arr = grad_arr + self.weight_decay * param_arr
                 
                 # Update moments (Adam-like)
-                m = self.m[param_id]
-                v = self.v[param_id]
+                m = self._m[param_id]
+                v = self._v[param_id]
                 m[:] = self.beta1 * m + (1.0 - self.beta1) * grad_arr
                 v[:] = self.beta2 * v + (1.0 - self.beta2) * (grad_arr ** 2)
                 
@@ -172,26 +172,26 @@ class QuantOptimizer:
         
         param_id = id(param)
         
-        if param_id not in self.m:
+        if param_id not in self._m:
             if isinstance(param.data[0], list):
-                self.m[param_id] = Tensor([[0.0] * len(row) for row in param.data])
-                self.v[param_id] = Tensor([[0.0] * len(row) for row in param.data])
+                self._m[param_id] = Tensor([[0.0] * len(row) for row in param.data])
+                self._v[param_id] = Tensor([[0.0] * len(row) for row in param.data])
             else:
-                self.m[param_id] = Tensor([0.0] * len(param.data))
-                self.v[param_id] = Tensor([0.0] * len(param.data))
+                self._m[param_id] = Tensor([0.0] * len(param.data))
+                self._v[param_id] = Tensor([0.0] * len(param.data))
         
         grad = Tensor(param.grad)
         if self.weight_decay > 0:
             grad = ops.add(grad, ops.mul(param, self.weight_decay))
         
-        m_prev = self.m[param_id]
+        m_prev = self._m[param_id]
         m_new = ops.add(ops.mul(m_prev, self.beta1), ops.mul(grad, 1.0 - self.beta1))
-        self.m[param_id] = m_new
+        self._m[param_id] = m_new
         
-        v_prev = self.v[param_id]
+        v_prev = self._v[param_id]
         grad_sq = ops.mul(grad, grad)
         v_new = ops.add(ops.mul(v_prev, self.beta2), ops.mul(grad_sq, 1.0 - self.beta2))
-        self.v[param_id] = v_new
+        self._v[param_id] = v_new
         
         bias_correction1 = 1.0 - (self.beta1 ** self.step_count)
         bias_correction2 = 1.0 - (self.beta2 ** self.step_count)

@@ -254,11 +254,10 @@ class Tensor:
         
         # Call backward function if it exists
         if self._backward_fn is not None:
-            # Pass gradient in appropriate format
-            if self._grad_np is not None:
-                self._backward_fn(self._grad_np)
-            else:
-                self._backward_fn(self._grad_list)
+            # Use incremental grad if provided, otherwise the initialized root gradient
+            # This prevents double-counting when a tensor is used multiple times in the graph
+            grad_to_pass = grad if grad is not None else (self._grad_np if self._grad_np is not None else self._grad_list)
+            self._backward_fn(grad_to_pass)
     
     @property
     def grad(self):

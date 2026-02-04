@@ -6,6 +6,12 @@ import pytest
 import math
 from quantml import Tensor
 from quantml import ops
+try:
+    import numpy as np
+    HAS_NUMPY = True
+except ImportError:
+    HAS_NUMPY = False
+    np = None
 
 
 class TestReLU:
@@ -47,11 +53,15 @@ class TestReLU:
         loss.backward()
         
         grad = x.grad
-        if isinstance(grad, list) and isinstance(grad[0], list):
+        if HAS_NUMPY and isinstance(grad, np.ndarray):
+            # Handle numpy case
+            assert grad[0][0] == pytest.approx(1.0)
+            assert grad[0][1] == pytest.approx(0.0)
+        elif isinstance(grad, list) and isinstance(grad[0], list):
             assert grad[0][0] == pytest.approx(1.0)  # d/dx relu(2) = 1
             assert grad[0][1] == pytest.approx(0.0)  # d/dx relu(-1) = 0
         else:
-            # Handle numpy case
+            # Handle 1D list or other cases
             assert grad[0] == pytest.approx(1.0)
             assert grad[1] == pytest.approx(0.0)
 

@@ -71,12 +71,12 @@ class AdaFactor:
     
     def step(self, param: Optional[Tensor] = None):
         """Perform a single optimization step."""
+        self.step_count += 1
         if param is not None:
             self._update_param(param)
         else:
             for p in self.params:
                 self._update_param(p)
-        self.step_count += 1
     
     def _update_param(self, param: Tensor):
         """Update a single parameter using AdaFactor algorithm."""

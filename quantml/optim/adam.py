@@ -64,8 +64,8 @@ class Adam:
         self.weight_decay = weight_decay
         
         # Moment estimates (stored as NumPy arrays for efficiency)
-        self.m: Dict[int, Any] = {}  # First moment
-        self.v: Dict[int, Any] = {}  # Second moment
+        self._m: Dict[int, Any] = {}  # First moment
+        self._v: Dict[int, Any] = {}  # Second moment
         self.step_count = 0
     
     def step(self, param: Optional[Tensor] = None):
@@ -75,13 +75,12 @@ class Adam:
         Args:
             param: Optional single parameter to update
         """
+        self.step_count += 1
         if param is not None:
             self._update_param(param)
         else:
             for p in self.params:
                 self._update_param(p)
-        
-        self.step_count += 1
     
     def _update_param(self, param: Tensor):
         """Update a single parameter using Adam algorithm with direct NumPy operations."""
@@ -105,20 +104,20 @@ class Adam:
                 param_arr = param.numpy if param.numpy is not None else np.array(param.data, dtype=np.float64)
                 
                 # Initialize moments if needed
-                if param_id not in self.m:
-                    self.m[param_id] = np.zeros_like(param_arr, dtype=np.float64)
-                    self.v[param_id] = np.zeros_like(param_arr, dtype=np.float64)
+                if param_id not in self._m:
+                    self._m[param_id] = np.zeros_like(param_arr, dtype=np.float64)
+                    self._v[param_id] = np.zeros_like(param_arr, dtype=np.float64)
                 
                 # Apply weight decay
                 if self.weight_decay > 0:
                     grad_arr = grad_arr + self.weight_decay * param_arr
                 
                 # Update biased first moment: m = beta1 * m + (1 - beta1) * grad
-                m = self.m[param_id]
+                m = self._m[param_id]
                 m[:] = self.beta1 * m + (1.0 - self.beta1) * grad_arr
                 
                 # Update biased second moment: v = beta2 * v + (1 - beta2) * grad^2
-                v = self.v[param_id]
+                v = self._v[param_id]
                 v[:] = self.beta2 * v + (1.0 - self.beta2) * (grad_arr ** 2)
                 
                 # Bias correction
@@ -153,13 +152,13 @@ class Adam:
         param_id = id(param)
         
         # Initialize moments if needed
-        if param_id not in self.m:
+        if param_id not in self._m:
             if isinstance(param.data[0], list):
-                self.m[param_id] = Tensor([[0.0] * len(row) for row in param.data])
-                self.v[param_id] = Tensor([[0.0] * len(row) for row in param.data])
+                self._m[param_id] = Tensor([[0.0] * len(row) for row in param.data])
+                self._v[param_id] = Tensor([[0.0] * len(row) for row in param.data])
             else:
-                self.m[param_id] = Tensor([0.0] * len(param.data))
-                self.v[param_id] = Tensor([0.0] * len(param.data))
+                self._m[param_id] = Tensor([0.0] * len(param.data))
+                self._v[param_id] = Tensor([0.0] * len(param.data))
         
         # Get gradient
         grad = Tensor(param.grad)
@@ -169,21 +168,21 @@ class Adam:
             grad = ops.add(grad, ops.mul(param, self.weight_decay))
         
         # Update biased first moment estimate: m = beta1 * m + (1 - beta1) * grad
-        m_prev = self.m[param_id]
+        m_prev = self._m[param_id]
         m_new = ops.add(
             ops.mul(m_prev, self.beta1),
             ops.mul(grad, 1.0 - self.beta1)
         )
-        self.m[param_id] = m_new
+        self._m[param_id] = m_new
         
         # Update biased second moment estimate: v = beta2 * v + (1 - beta2) * grad^2
-        v_prev = self.v[param_id]
+        v_prev = self._v[param_id]
         grad_sq = ops.mul(grad, grad)
         v_new = ops.add(
             ops.mul(v_prev, self.beta2),
             ops.mul(grad_sq, 1.0 - self.beta2)
         )
-        self.v[param_id] = v_new
+        self._v[param_id] = v_new
         
         # Bias correction
         bias_correction1 = 1.0 - (self.beta1 ** self.step_count)
@@ -228,7 +227,7 @@ class Adam:
         # Convert NumPy arrays to lists for serialization
         m_data = {}
         v_data = {}
-        for k, v in self.m.items():
+        for k, v in self._m.items():
             if HAS_NUMPY and isinstance(v, np.ndarray):
                 m_data[k] = v.tolist()
             elif isinstance(v, Tensor):
@@ -236,7 +235,7 @@ class Adam:
             else:
                 m_data[k] = v
         
-        for k, v in self.v.items():
+        for k, v in self._v.items():
             if HAS_NUMPY and isinstance(v, np.ndarray):
                 v_data[k] = v.tolist()
             elif isinstance(v, Tensor):
@@ -256,12 +255,12 @@ class Adam:
         # Reconstruct moment arrays from data
         for k, m_data in state_dict.get('m', {}).items():
             if HAS_NUMPY:
-                self.m[int(k)] = np.array(m_data, dtype=np.float64)
+                self._m[int(k)] = np.array(m_data, dtype=np.float64)
             else:
-                self.m[int(k)] = Tensor(m_data)
+                self._m[int(k)] = Tensor(m_data)
         for k, v_data in state_dict.get('v', {}).items():
             if HAS_NUMPY:
-                self.v[int(k)] = np.array(v_data, dtype=np.float64)
+                self._v[int(k)] = np.array(v_data, dtype=np.float64)
             else:
-                self.v[int(k)] = Tensor(v_data)
+                self._v[int(k)] = Tensor(v_data)
 
