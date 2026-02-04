@@ -3,14 +3,14 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "quantml"
+name = "quantmllibrary"
 version = "0.1.0"
 description = "A clean, minimal ML library optimized for quantitative trading, streaming data, and online learning"
 readme = "README.md"
 requires-python = ">=3.8"
 license = {text = "MIT"}
 authors = [
-    {name = "QuantML Contributors"}
+    {name = "Sritej Bommaraju", email = "bommaraju@berkeley.edu"}
 ]
 keywords = [
     "machine-learning",
@@ -46,10 +46,10 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/quantml/quantml"
-Documentation = "https://github.com/quantml/quantml#readme"
-Repository = "https://github.com/quantml/quantml"
-Issues = "https://github.com/quantml/quantml/issues"
+Homepage = "https://github.com/SritejBommaraju/quantmllibrary"
+Documentation = "https://github.com/SritejBommaraju/quantmllibrary#readme"
+Repository = "https://github.com/SritejBommaraju/quantmllibrary"
+Issues = "https://github.com/SritejBommaraju/quantmllibrary/issues"
 
 [tool.setuptools.packages.find]
 where = ["."]

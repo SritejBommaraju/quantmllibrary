@@ -20,9 +20,8 @@ A clean, minimal, hackable machine learning library optimized specifically for q
 ## Installation
 
 ### From PyPI (when published)
-
 ```bash
-pip install quantml
+pip install quantmllibrary
 ```
 
 ### From Source
@@ -37,7 +36,7 @@ pip install -e .
 
 ```bash
 # With NumPy for performance
-pip install quantml[numpy]
+pip install quantmllibrary[numpy]
 
 # Development dependencies
 pip install -r requirements-dev.txt
