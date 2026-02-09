@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m pytest:*)",
+      "Bash(findstr:*)",
+      "Bash(python:*)",
+      "Bash(del test_output.txt failures.txt activations_fail.txt full_debug_output.txt activations_debug.txt leaky_fail.txt radam_res.txt leaky_debug.txt activations_res.txt all_tests_res.txt adam_fail.txt test_v.txt collected_opts.txt act_res.txt radam_res_2.txt adam_res_2.txt leaky_single.txt act_v_res.txt act_res_2.txt opts_res_2.txt all_tests_final.txt mse_debug.txt mse_debug_2.txt final_verification.txt impressive_res.txt all_tests_final_2.txt final_pass.txt)",
+      "Bash(git rm:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)"
+    ]
+  }
+}
