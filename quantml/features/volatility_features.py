@@ -68,7 +68,8 @@ class VolatilityRegimeFeature(BaseFeature):
         high_threshold = sorted_vols[high_idx]
         
         # Map to regimes
-        regimes = [1.0] * window  # Not enough data
+        # +1 accounts for the element lost when computing returns
+        regimes = [1.0] * (window + 1)  # Not enough data
         
         for vol in volatilities:
             if vol < low_threshold:
@@ -122,7 +123,8 @@ class RealizedVolatilityFeature(BaseFeature):
             returns.append(ret)
         
         # Calculate rolling volatility
-        volatilities = [0.0] * min(window, len(prices))
+        # +1 accounts for the element lost when computing returns
+        volatilities = [0.0] * min(window + 1, len(prices))
         
         for i in range(window, len(returns)):
             window_rets = returns[i-window:i]

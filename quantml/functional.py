@@ -26,12 +26,16 @@ sigmoid = ops.sigmoid
 tanh = ops.tanh
 abs = ops.abs
 maximum = ops.maximum
+transpose = ops.transpose
+select = ops.select
+stack = ops.stack
 
 __all__ = [
     'add', 'sub', 'mul', 'div', 'pow',
     'matmul', 'dot',
     'sum', 'mean', 'std',
     'relu', 'sigmoid', 'tanh',
-    'abs', 'maximum'
+    'abs', 'maximum',
+    'transpose', 'select', 'stack'
 ]
 

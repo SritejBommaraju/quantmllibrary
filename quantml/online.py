@@ -135,16 +135,20 @@ def per_tick_training_step(
     # Update parameters
     if hasattr(model, 'parameters'):
         params = model.parameters()
-        grads = [p.grad for p in params if p.grad is not None]
-        
+
         if optimizer is not None:
-            for param, grad in zip(params, grads):
-                optimizer.step(grad, param)
+            for param in params:
+                if param.grad is not None:
+                    optimizer.step(param.grad, param)
         else:
-            # Simple SGD update
-            updated = incremental_update(params, grads, learning_rate)
-            # In a real implementation, we'd update model parameters in-place
-            # For now, this demonstrates the pattern
+            # Simple SGD update: param = param - lr * grad (in-place)
+            from quantml import ops
+            for param in params:
+                if param.grad is not None:
+                    update = ops.mul(Tensor(param.grad), learning_rate)
+                    new_data = ops.sub(Tensor(param.data), update)
+                    param._data_list = new_data.data
+                    param._np_array = None
     
     # Get loss value
     if isinstance(loss.data, list):

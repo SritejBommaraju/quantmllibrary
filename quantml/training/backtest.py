@@ -104,15 +104,14 @@ class BacktestEngine:
             trade_size = target_position - position
             
             if abs(trade_size) > 1e-6:  # Only trade if significant
-                # Apply slippage
+                # Apply slippage to execution price
                 execution_price = price * (1 + self.slippage * (1 if trade_size > 0 else -1))
-                
-                # Calculate costs
+
+                # Calculate costs (commission only - slippage already in execution_price)
                 trade_value = abs(trade_size * execution_price)
                 commission_cost = trade_value * self.commission
-                slippage_cost = abs(trade_size * price * self.slippage)
-                total_cost = commission_cost + slippage_cost
-                
+                total_cost = commission_cost
+
                 # Update capital
                 capital -= trade_size * execution_price + total_cost
                 

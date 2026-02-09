@@ -10,6 +10,9 @@ from typing import Union, Optional, List, Any, Callable
 from quantml.tensor import Tensor
 from quantml.autograd import backward
 
+# Save reference to builtin sum before it gets shadowed by ops.sum
+_builtin_sum = sum
+
 # Try to import NumPy for optimized operations
 try:
     import numpy as np
@@ -440,9 +443,9 @@ def matmul(a: Tensor, b: Tensor) -> Tensor:
             n2, p = len(b_data), len(b_data[0])
             if n != n2:
                 raise ValueError(f"Matrix dimensions incompatible: {a.shape} x {b.shape}")
-            out_data = [[sum(float(a_data[i][k]) * float(b_data[k][j]) 
-                            for k in range(n)) 
-                        for j in range(p)] 
+            out_data = [[_builtin_sum(float(a_data[i][k]) * float(b_data[k][j])
+                            for k in range(n))
+                        for j in range(p)]
                        for i in range(m)]
             out = Tensor(
                 out_data,
@@ -456,9 +459,9 @@ def matmul(a: Tensor, b: Tensor) -> Tensor:
         n2, p = len(b_data), len(b_data[0])
         if n != n2:
             raise ValueError(f"Matrix dimensions incompatible: {a.shape} x {b.shape}")
-        out_data = [[sum(float(a_data[i][k]) * float(b_data[k][j]) 
-                        for k in range(n)) 
-                    for j in range(p)] 
+        out_data = [[_builtin_sum(float(a_data[i][k]) * float(b_data[k][j])
+                        for k in range(n))
+                    for j in range(p)]
                    for i in range(m)]
         out = Tensor(
             out_data,
@@ -480,41 +483,73 @@ def matmul(a: Tensor, b: Tensor) -> Tensor:
                     # Fallback
                     b_T = [[b_data[j][i] for j in range(len(b_data))] 
                            for i in range(len(b_data[0]))]
-                    a_grad = [[sum(float(grad[i][k]) * float(b_T[k][j]) 
-                                  for k in range(len(grad[0]))) 
-                              for j in range(len(b_T[0]))] 
+                    a_grad = [[_builtin_sum(float(grad[i][k]) * float(b_T[k][j])
+                                  for k in range(len(grad[0])))
+                              for j in range(len(b_T[0]))]
                              for i in range(len(grad))]
             else:
-                b_T = [[b_data[j][i] for j in range(len(b_data))] 
+                b_T = [[b_data[j][i] for j in range(len(b_data))]
                        for i in range(len(b_data[0]))]
-                a_grad = [[sum(float(grad[i][k]) * float(b_T[k][j]) 
-                              for k in range(len(grad[0]))) 
-                          for j in range(len(b_T[0]))] 
+                a_grad = [[_builtin_sum(float(grad[i][k]) * float(b_T[k][j])
+                              for k in range(len(grad[0])))
+                          for j in range(len(b_T[0]))]
                          for i in range(len(grad))]
             a.backward(a_grad)
         if b.requires_grad:
-            # dL/db = a.T @ grad
+            # dL/db = a.T @ grad (for 2D), or sum_b(a[b].T @ grad[b]) for 3D batched
             if HAS_NUMPY:
                 try:
                     a_arr = np.array(a_data, dtype=np.float64)
                     grad_arr = np.array(grad, dtype=np.float64)
-                    b_grad_arr = np.dot(a_arr.T, grad_arr)
+                    if a_arr.ndim == 3 and grad_arr.ndim == 3:
+                        b_grad_arr = np.einsum('bsi,bsj->ij', a_arr, grad_arr)
+                    else:
+                        b_grad_arr = np.dot(a_arr.T, grad_arr)
                     b_grad = b_grad_arr.tolist()
                 except (ValueError, TypeError):
                     # Fallback
-                    a_T = [[a_data[j][i] for j in range(len(a_data))] 
-                           for i in range(len(a_data[0]))]
-                    b_grad = [[sum(float(a_T[i][k]) * float(grad[k][j]) 
-                                  for k in range(len(a_T[0]))) 
-                              for j in range(len(grad[0]))] 
-                             for i in range(len(a_T))]
+                    if isinstance(a_data[0], list) and isinstance(a_data[0][0], list):
+                        # 3D: sum over batches of a[b].T @ grad[b]
+                        d_in = len(a_data[0][0])
+                        d_out = len(grad[0][0]) if isinstance(grad[0][0], list) else len(grad[0])
+                        b_grad = [[0.0] * d_out for _ in range(d_in)]
+                        for batch_idx in range(len(a_data)):
+                            a_b = a_data[batch_idx]
+                            g_b = grad[batch_idx] if isinstance(grad[0], list) else grad
+                            seq_len = len(a_b)
+                            for i in range(d_in):
+                                for j in range(d_out):
+                                    b_grad[i][j] += _builtin_sum(
+                                        float(a_b[s][i]) * float(g_b[s][j])
+                                        for s in range(seq_len))
+                    else:
+                        a_T = [[a_data[j][i] for j in range(len(a_data))]
+                               for i in range(len(a_data[0]))]
+                        b_grad = [[_builtin_sum(float(a_T[i][k]) * float(grad[k][j])
+                                      for k in range(len(a_T[0])))
+                                  for j in range(len(grad[0]))]
+                                 for i in range(len(a_T))]
             else:
-                a_T = [[a_data[j][i] for j in range(len(a_data))] 
-                       for i in range(len(a_data[0]))]
-                b_grad = [[sum(float(a_T[i][k]) * float(grad[k][j]) 
-                              for k in range(len(a_T[0]))) 
-                          for j in range(len(grad[0]))] 
-                         for i in range(len(a_T))]
+                if isinstance(a_data[0], list) and isinstance(a_data[0][0], list):
+                    d_in = len(a_data[0][0])
+                    d_out = len(grad[0][0]) if isinstance(grad[0][0], list) else len(grad[0])
+                    b_grad = [[0.0] * d_out for _ in range(d_in)]
+                    for batch_idx in range(len(a_data)):
+                        a_b = a_data[batch_idx]
+                        g_b = grad[batch_idx] if isinstance(grad[0], list) else grad
+                        seq_len = len(a_b)
+                        for i in range(d_in):
+                            for j in range(d_out):
+                                b_grad[i][j] += _builtin_sum(
+                                    float(a_b[s][i]) * float(g_b[s][j])
+                                    for s in range(seq_len))
+                else:
+                    a_T = [[a_data[j][i] for j in range(len(a_data))]
+                           for i in range(len(a_data[0]))]
+                    b_grad = [[_builtin_sum(float(a_T[i][k]) * float(grad[k][j])
+                                  for k in range(len(a_T[0])))
+                              for j in range(len(grad[0]))]
+                             for i in range(len(a_T))]
             b.backward(b_grad)
     
     if out.requires_grad:
@@ -551,9 +586,9 @@ def dot(a: Tensor, b: Tensor) -> Tensor:
             b_arr = np.array(b_flat, dtype=np.float64)
             result = float(np.dot(a_arr, b_arr))
         except (ValueError, TypeError):
-            result = sum(float(a_flat[i]) * float(b_flat[i]) for i in range(len(a_flat)))
+            result = _builtin_sum(float(a_flat[i]) * float(b_flat[i]) for i in range(len(a_flat)))
     else:
-        result = sum(float(a_flat[i]) * float(b_flat[i]) for i in range(len(a_flat)))
+        result = _builtin_sum(float(a_flat[i]) * float(b_flat[i]) for i in range(len(a_flat)))
     
     out = Tensor(
         [[result]],
@@ -650,6 +685,178 @@ def _transpose_pure_python(data):
     if not isinstance(data[0], list):
         return [[x] for x in data]
     return [[data[j][i] for j in range(len(data))] for i in range(len(data[0]))]
+
+
+def select(t: Tensor, index: int, dim: int = 0) -> Tensor:
+    """
+    Select a slice from a tensor along a dimension, preserving the autograd graph.
+
+    For a 3D tensor of shape (B, S, D) with dim=0, returns tensor[index]
+    of shape (S, D).
+
+    Args:
+        t: Input tensor (must be 3D for dim=0)
+        index: Index to select along the dimension
+        dim: Dimension to select along (currently only 0 is supported)
+
+    Returns:
+        Tensor with one fewer dimension
+    """
+    t = _to_tensor(t)
+
+    if dim != 0:
+        raise ValueError(f"select currently only supports dim=0, got dim={dim}")
+
+    if HAS_NUMPY:
+        try:
+            t_arr = t.numpy if (t.numpy is not None) else np.array(t.data, dtype=np.float64)
+            if t_arr is not None:
+                out_arr = t_arr[index].copy()
+                out = _create_tensor_from_numpy(
+                    out_arr,
+                    requires_grad=t.requires_grad,
+                    _prev={t} if t.requires_grad else set(),
+                    _op='select'
+                )
+            else:
+                out = Tensor(
+                    t.data[index],
+                    requires_grad=t.requires_grad,
+                    _prev={t} if t.requires_grad else set(),
+                    _op='select'
+                )
+        except (ValueError, TypeError, IndexError):
+            out = Tensor(
+                t.data[index],
+                requires_grad=t.requires_grad,
+                _prev={t} if t.requires_grad else set(),
+                _op='select'
+            )
+    else:
+        out = Tensor(
+            t.data[index],
+            requires_grad=t.requires_grad,
+            _prev={t} if t.requires_grad else set(),
+            _op='select'
+        )
+
+    _index = index
+    _t = t
+
+    def _backward(grad):
+        if _t.requires_grad:
+            if HAS_NUMPY:
+                try:
+                    grad_arr = np.array(grad, dtype=np.float64) if not isinstance(grad, np.ndarray) else grad
+                    t_arr = _t.numpy if (_t.numpy is not None) else np.array(_t.data, dtype=np.float64)
+                    t_grad = np.zeros_like(t_arr)
+                    t_grad[_index] = grad_arr
+                    _t.backward(t_grad)
+                    return
+                except (ValueError, TypeError):
+                    pass
+            # Pure Python fallback
+            t_data = _t.data
+            batch_size = len(t_data)
+            t_grad = []
+            for b in range(batch_size):
+                if b == _index:
+                    if isinstance(grad, list):
+                        t_grad.append(grad)
+                    else:
+                        t_grad.append(np.array(grad, dtype=np.float64).tolist() if HAS_NUMPY else grad)
+                else:
+                    row = t_data[b]
+                    if isinstance(row, list) and len(row) > 0 and isinstance(row[0], list):
+                        t_grad.append([[0.0] * len(row[0]) for _ in range(len(row))])
+                    elif isinstance(row, list):
+                        t_grad.append([0.0] * len(row))
+                    else:
+                        t_grad.append(0.0)
+            _t.backward(t_grad)
+
+    if out.requires_grad:
+        out._backward_fn = _backward
+
+    return out
+
+
+def stack(tensors: List[Tensor], dim: int = 0) -> Tensor:
+    """
+    Stack a list of tensors along a new dimension, preserving the autograd graph.
+
+    For a list of N tensors each of shape (S, D), returns a tensor of
+    shape (N, S, D) when dim=0.
+
+    Args:
+        tensors: List of tensors to stack (must all have the same shape)
+        dim: Dimension along which to stack (currently only 0 is supported)
+
+    Returns:
+        Stacked tensor with one additional dimension
+    """
+    if dim != 0:
+        raise ValueError(f"stack currently only supports dim=0, got dim={dim}")
+
+    if len(tensors) == 0:
+        raise ValueError("stack requires at least one tensor")
+
+    tensors = [_to_tensor(t) for t in tensors]
+    any_requires_grad = any(t.requires_grad for t in tensors)
+
+    if HAS_NUMPY:
+        try:
+            arrays = []
+            for t in tensors:
+                arr = t.numpy if (t.numpy is not None) else np.array(t.data, dtype=np.float64)
+                if arr is None:
+                    raise TypeError("Cannot convert to numpy")
+                arrays.append(arr)
+            out_arr = np.stack(arrays, axis=0)
+            out = _create_tensor_from_numpy(
+                out_arr,
+                requires_grad=any_requires_grad,
+                _prev=set(tensors) if any_requires_grad else set(),
+                _op='stack'
+            )
+        except (ValueError, TypeError):
+            out_data = [t.data for t in tensors]
+            out = Tensor(
+                out_data,
+                requires_grad=any_requires_grad,
+                _prev=set(tensors) if any_requires_grad else set(),
+                _op='stack'
+            )
+    else:
+        out_data = [t.data for t in tensors]
+        out = Tensor(
+            out_data,
+            requires_grad=any_requires_grad,
+            _prev=set(tensors) if any_requires_grad else set(),
+            _op='stack'
+        )
+
+    _tensors = tensors
+
+    def _backward(grad):
+        for i, t in enumerate(_tensors):
+            if t.requires_grad:
+                if HAS_NUMPY:
+                    try:
+                        grad_arr = np.array(grad, dtype=np.float64) if not isinstance(grad, np.ndarray) else grad
+                        t.backward(grad_arr[i])
+                        continue
+                    except (ValueError, TypeError):
+                        pass
+                if isinstance(grad, list):
+                    t.backward(grad[i])
+                else:
+                    t.backward(grad)
+
+    if out.requires_grad:
+        out._backward_fn = _backward
+
+    return out
 
 
 def sum(t: Tensor, axis: Optional[int] = None) -> Tensor:
@@ -755,19 +962,19 @@ def sum(t: Tensor, axis: Optional[int] = None) -> Tensor:
                 total = 0.0
                 if isinstance(t.data[0], list):
                     for row in t.data:
-                        total += sum(float(x) for x in row)
+                        total += _builtin_sum(float(x) for x in row)
                 else:
-                    total = sum(float(x) for x in t.data)
+                    total = _builtin_sum(float(x) for x in t.data)
                 out_data = [[total]]
             elif axis == 0:
                 if isinstance(t.data[0], list):
-                    out_data = [[sum(float(t.data[i][j]) for i in range(len(t.data))) 
+                    out_data = [[_builtin_sum(float(t.data[i][j]) for i in range(len(t.data)))
                                 for j in range(len(t.data[0]))]]
                 else:
-                    out_data = [[sum(float(x) for x in t.data)]]
+                    out_data = [[_builtin_sum(float(x) for x in t.data)]]
             elif axis == 1:
                 if isinstance(t.data[0], list):
-                    out_data = [[sum(float(row[j]) for j in range(len(row)))] 
+                    out_data = [[_builtin_sum(float(row[j]) for j in range(len(row)))]
                                for row in t.data]
                 else:
                     out_data = t.data
@@ -779,19 +986,19 @@ def sum(t: Tensor, axis: Optional[int] = None) -> Tensor:
             total = 0.0
             if isinstance(t.data[0], list):
                 for row in t.data:
-                    total += sum(float(x) for x in row)
+                    total += _builtin_sum(float(x) for x in row)
             else:
-                total = sum(float(x) for x in t.data)
+                total = _builtin_sum(float(x) for x in t.data)
             out_data = [[total]]
         elif axis == 0:
             if isinstance(t.data[0], list):
-                out_data = [[sum(float(t.data[i][j]) for i in range(len(t.data))) 
+                out_data = [[_builtin_sum(float(t.data[i][j]) for i in range(len(t.data)))
                             for j in range(len(t.data[0]))]]
             else:
-                out_data = [[sum(float(x) for x in t.data)]]
+                out_data = [[_builtin_sum(float(x) for x in t.data)]]
         elif axis == 1:
             if isinstance(t.data[0], list):
-                out_data = [[sum(float(row[j]) for j in range(len(row)))] 
+                out_data = [[_builtin_sum(float(row[j]) for j in range(len(row)))]
                            for row in t.data]
             else:
                 out_data = t.data
@@ -1358,14 +1565,14 @@ def softmax(t: Tensor, axis: int = -1) -> Tensor:
                     s = out_data[i]  # softmax output
                     g = grad[i]  # upstream gradient
                     # Sum over all k: s[j] * (delta_jk - s[k]) * g[k]
-                    dot_sg = sum(float(s[k]) * float(g[k]) for k in range(len(s)))
+                    dot_sg = _builtin_sum(float(s[k]) * float(g[k]) for k in range(len(s)))
                     for j in range(len(g)):
                         row_grad.append(float(s[j]) * (float(g[j]) - dot_sg))
                     t_grad.append(row_grad)
             elif isinstance(grad, list):
                 s = out_data
                 g = grad
-                dot_sg = sum(float(s[k]) * float(g[k]) for k in range(len(s)))
+                dot_sg = _builtin_sum(float(s[k]) * float(g[k]) for k in range(len(s)))
                 t_grad = [float(s[j]) * (float(g[j]) - dot_sg) for j in range(len(g))]
             else:
                 t_grad = grad

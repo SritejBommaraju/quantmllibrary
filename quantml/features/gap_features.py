@@ -72,7 +72,7 @@ class GapSizeFeature(BaseFeature):
         self.metadata.formula = "gap_size = |gap|"
         self.metadata.expected_range = (0.0, 0.1) if normalize else None
     
-    def compute(self, data: Dict[str, List[float]]) -> List[float]):
+    def compute(self, data: Dict[str, List[float]]) -> List[float]:
         """Compute gap sizes."""
         gap_feature = OvernightGapFeature(normalize=self.params.get('normalize', True))
         gaps = gap_feature.compute(data)

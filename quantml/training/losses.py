@@ -146,16 +146,31 @@ def huber_loss(pred: Tensor, target: Tensor, delta: float = 1.0) -> Tensor:
     """
     diff = ops.sub(pred, target)
     abs_diff = ops.abs(diff)
-    
+
     # L_huber = 0.5 * diff^2 if |diff| <= delta, else delta * (|diff| - 0.5*delta)
-    # We'll use a smooth approximation
+    # Use: squared + relu(|diff| - delta) * (linear - squared)
+    # When |diff| <= delta: relu = 0, so result = squared = 0.5*diff^2  (correct)
+    # When |diff| > delta: relu > 0, switches to linear region
     squared = ops.mul(ops.mul(diff, diff), 0.5)
-    linear = ops.sub(ops.mul(abs_diff, delta), ops.mul(delta * delta, 0.5))
-    
-    # Use relu to switch between squared and linear
-    # Simplified: use squared for small errors, linear for large
-    loss = ops.add(squared, ops.mul(ops.relu(ops.sub(abs_diff, delta)), ops.sub(linear, squared)))
-    
+    linear = ops.sub(ops.mul(abs_diff, delta), delta * delta * 0.5)
+
+    # Indicator: relu(|diff| - delta) > 0 when |diff| > delta
+    # We want: squared when |diff| <= delta, linear when |diff| > delta
+    # Use: linear + relu(delta - |diff|) * (squared - linear)
+    # When |diff| <= delta: relu(delta-|diff|) > 0, result = linear + (squared - linear) = squared
+    # When |diff| > delta: relu(delta-|diff|) = 0, result = linear
+    indicator = ops.relu(ops.sub(Tensor([[delta]]), abs_diff))
+    # Clamp indicator to 0 or 1 by using min(indicator/eps, 1) approximation
+    # Simpler: just pick between squared and linear based on threshold
+    # loss = linear + relu(delta - |diff|) / (delta - |diff| + eps) * (squared - linear)
+    # Actually simplest correct approach: loss = min(squared, linear + 0.5*delta^2)
+    # But let's use the standard formulation:
+    # huber = where(|diff| <= delta, 0.5*diff^2, delta*(|diff| - 0.5*delta))
+    # Equivalent: huber = delta * |diff| - 0.5 * delta^2 + 0.5 * relu(delta - |diff|)^2
+    # = delta * |diff| - 0.5*delta^2 + 0.5 * max(0, delta-|diff|)^2
+    clamped = ops.relu(ops.sub(Tensor([[delta]]), abs_diff))
+    loss = ops.add(linear, ops.mul(ops.mul(clamped, clamped), 0.5))
+
     return ops.mean(loss)
 
 
@@ -174,14 +189,21 @@ def asymmetric_loss(pred: Tensor, target: Tensor, asymmetry: float = 1.0) -> Ten
         Asymmetric loss tensor
     """
     diff = ops.sub(pred, target)
-    
+
     # L_asym = asymmetry * diff^2 if diff > 0, else diff^2
     diff_sq = ops.mul(diff, diff)
-    
-    # Weight over-predictions more
-    over_pred = ops.mul(ops.relu(diff), ops.mul(diff_sq, asymmetry - 1.0))
-    loss = ops.add(diff_sq, over_pred)
-    
+
+    # Split into positive and negative parts using relu
+    # pos_sq = relu(diff)^2 = diff^2 when diff > 0, 0 otherwise
+    # neg_sq = relu(-diff)^2 = diff^2 when diff < 0, 0 otherwise
+    pos_diff = ops.relu(diff)
+    neg_diff = ops.relu(ops.mul(diff, -1.0))
+    pos_sq = ops.mul(pos_diff, pos_diff)
+    neg_sq = ops.mul(neg_diff, neg_diff)
+
+    # loss = asymmetry * pos_sq + neg_sq
+    loss = ops.add(ops.mul(pos_sq, asymmetry), neg_sq)
+
     return ops.mean(loss)
 
 

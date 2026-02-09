@@ -14,17 +14,21 @@ from quantml.models.linear import Linear
 class SelfAttention:
     """
     Scaled Dot-Product Self-Attention.
-    
+
     Attention(Q, K, V) = softmax(QK^T / sqrt(d_k))V
-    
+
     Attributes:
         embed_dim: Dimension of embeddings
         num_heads: Number of attention heads (default: 1)
         dropout: Dropout probability
-    
+
+    Note:
+        Supports both 2D inputs (seq_len x embed_dim) and 3D batched inputs
+        (batch x seq_len x embed_dim) with full autograd support.
+
     Examples:
         >>> attn = SelfAttention(64)
-        >>> x = Tensor([[[1.0] * 64] * 10])  # batch x seq x dim
+        >>> x = Tensor([[1.0] * 64] * 10)  # seq x dim (autograd supported)
         >>> out = attn.forward(x)
     """
     
@@ -76,21 +80,17 @@ class SelfAttention:
         if isinstance(data[0][0], list): # 3D
             batch_size = len(data)
             out_batches = []
-            
+
             for b in range(batch_size):
-                # Extract batch slice as 2D tensor
-                q_b = self._get_batch_slice(q, b)
-                k_b = self._get_batch_slice(k, b)
-                v_b = self._get_batch_slice(v, b)
-                mask_b = self._get_batch_slice(mask, b) if mask is not None else None
-                
+                q_b = ops.select(q, b, dim=0)
+                k_b = ops.select(k, b, dim=0)
+                v_b = ops.select(v, b, dim=0)
+                mask_b = ops.select(mask, b, dim=0) if mask is not None else None
+
                 out_b = self._attention_2d(q_b, k_b, v_b, mask_b)
-                out_batches.append(out_b.data)
-            
-            # Combine back to 3D tensor
-            # Note: This breaks autograd graph effectively unless we are careful
-            # Ideally we'd use 3D ops
-            attn_out = Tensor(out_batches, requires_grad=True) # Graph broken here for now
+                out_batches.append(out_b)
+
+            attn_out = ops.stack(out_batches, dim=0)
         else:
             # 2D case
             attn_out = self._attention_2d(q, k, v, mask)
@@ -102,7 +102,7 @@ class SelfAttention:
         """Compute attention for single sample (seq_len x dim)."""
         # K^T
         # K is (S, D), we need (D, S) manually transposed
-        K_T = self._transpose_2d(K)
+        K_T = ops.transpose(K)
         
         # Scores: (S, D) @ (D, S) -> (S, S)
         scores = ops.matmul(An, K_T)
@@ -123,21 +123,9 @@ class SelfAttention:
         
         return output
 
-    def _transpose_2d(self, t: Tensor) -> Tensor:
-        """Transpose 2D tensor."""
-        data = t.data
-        rows = len(data)
-        cols = len(data[0])
-        new_data = [[data[i][j] for i in range(rows)] for j in range(cols)]
-        return Tensor(new_data, requires_grad=t.requires_grad)
-
-    def _get_batch_slice(self, t: Tensor, idx: int) -> Tensor:
-        """Get 2D slice from 3D tensor."""
-        return Tensor(t.data[idx], requires_grad=t.requires_grad)
-        
     def parameters(self) -> List[Tensor]:
         """Get parameters."""
-        return (self.q_proj.parameters() + 
+        return (self.q_proj.parameters() +
                 self.k_proj.parameters() + 
                 self.v_proj.parameters() + 
                 self.out_proj.parameters())
@@ -151,13 +139,18 @@ class SelfAttention:
 class MultiHeadAttention:
     """
     Multi-Head Attention.
-    
+
     Splits embedding into multiple heads, applies attention independently,
     and concatenates results.
-    
+
     Attributes:
         embed_dim: Model dimension
         num_heads: Number of heads
+
+    Note:
+        Currently operates as a single-head attention (placeholder until
+        reshape/permute ops are added). Supports both 2D and 3D batched
+        inputs with full autograd support.
     """
     
     def __init__(self, embed_dim: int, num_heads: int, dropout: float = 0.0):
@@ -204,48 +197,36 @@ class MultiHeadAttention:
         return self._fallback_single_head(q, k, v, mask)
 
     def _fallback_single_head(self, q, k, v, mask):
-        # Same logic as SelfAttention._attention_2d but handling batches loop
         data = q.data
         if isinstance(data[0][0], list): # 3D
             batch_size = len(data)
             out_batches = []
             for b in range(batch_size):
-                q_b = self._get_batch_slice(q, b)
-                k_b = self._get_batch_slice(k, b)
-                v_b = self._get_batch_slice(v, b)
-                mask_b = self._get_batch_slice(mask, b) if mask is not None else None
-                
-                # Manual attention with correct scaling for head_dim
-                K_T = self._transpose_2d(k_b)
+                q_b = ops.select(q, b, dim=0)
+                k_b = ops.select(k, b, dim=0)
+                v_b = ops.select(v, b, dim=0)
+                mask_b = ops.select(mask, b, dim=0) if mask is not None else None
+
+                K_T = ops.transpose(k_b)
                 scores = ops.matmul(q_b, K_T)
                 scaled_scores = ops.mul(scores, self.scale)
                 if mask_b is not None:
                     scaled_scores = ops.add(scaled_scores, mask_b)
                 attn_weights = ops.softmax(scaled_scores, axis=-1)
                 out_b = ops.matmul(attn_weights, v_b)
-                
-                out_batches.append(out_b.data)
-            attn_out = Tensor(out_batches, requires_grad=True)
+
+                out_batches.append(out_b)
+            attn_out = ops.stack(out_batches, dim=0)
         else:
-            K_T = self._transpose_2d(k)
+            K_T = ops.transpose(k)
             scores = ops.matmul(q, K_T)
             scaled_scores = ops.mul(scores, self.scale)
             if mask is not None:
                 scaled_scores = ops.add(scaled_scores, mask)
             attn_weights = ops.softmax(scaled_scores, axis=-1)
             attn_out = ops.matmul(attn_weights, v)
-            
+
         return self.out_proj.forward(attn_out)
-
-    def _transpose_2d(self, t: Tensor) -> Tensor:
-        data = t.data
-        rows = len(data)
-        cols = len(data[0])
-        new_data = [[data[i][j] for i in range(rows)] for j in range(cols)]
-        return Tensor(new_data, requires_grad=t.requires_grad)
-
-    def _get_batch_slice(self, t: Tensor, idx: int) -> Tensor:
-        return Tensor(t.data[idx], requires_grad=t.requires_grad)
 
     def parameters(self) -> List[Tensor]:
         return (self.q_proj.parameters() + 

@@ -137,22 +137,27 @@ def rolling_mean(t: Tensor, n: int) -> Tensor:
     if HAS_NUMPY:
         try:
             data_arr = np.array(data, dtype=np.float64)
-            rolling_means = np.convolve(data_arr, np.ones(n)/n, mode='same')
-            # Pad beginning
+            # Use cumsum for efficient trailing (causal) rolling mean
+            cumsum = np.cumsum(data_arr)
+            rolling_means = np.empty_like(data_arr)
+            # Pad beginning with first value
             rolling_means[:n-1] = data_arr[0]
+            # Trailing mean: sum of last n elements / n
+            rolling_means[n-1] = cumsum[n-1] / n
+            rolling_means[n:] = (cumsum[n:] - cumsum[:-n]) / n
             return Tensor([rolling_means.tolist()], requires_grad=t.requires_grad)
         except (ValueError, TypeError):
             pass
-    
+
     # Pure Python fallback
     rolling_means = []
     for i in range(n - 1):
         rolling_means.append(float(data[0]))
-    
+
     for i in range(n - 1, len(data)):
         window_sum = sum(float(data[j]) for j in range(i - n + 1, i + 1))
         rolling_means.append(window_sum / n)
-    
+
     return Tensor([rolling_means], requires_grad=t.requires_grad)
 
 
@@ -213,12 +218,18 @@ def zscore(t: Tensor, n: int) -> Tensor:
         Tensor with z-scores
     """
     t = _to_tensor(t)
-    mean_vals = rolling_mean(t, n)
-    std_vals = rolling_std(t, n)
-    
+    # Ensure t is 2D to match rolling_mean/rolling_std output shape
+    t_data = t.data
+    if not isinstance(t_data[0], list):
+        t_2d = Tensor([t_data], requires_grad=t.requires_grad)
+    else:
+        t_2d = t
+    mean_vals = rolling_mean(t_2d, n)
+    std_vals = rolling_std(t_2d, n)
+
     # Avoid division by zero
     std_safe = ops.add(std_vals, Tensor([[1e-8]]))
-    return ops.div(ops.sub(t, mean_vals), std_safe)
+    return ops.div(ops.sub(t_2d, mean_vals), std_safe)
 
 
 def volatility(t: Tensor, n: int, annualize: bool = True) -> Tensor:

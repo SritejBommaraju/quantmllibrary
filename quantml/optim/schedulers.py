@@ -219,20 +219,26 @@ class CyclicLR(LRScheduler):
     def get_lr(self) -> List[float]:
         """Compute learning rate."""
         cycle = math.floor(1 + self.last_epoch / self.step_size)
-        x = 1 + self.last_epoch / self.step_size - cycle
-        
-        if x <= self.step_size_up / self.step_size:
-            scale = x * (self.step_size / self.step_size_up)
+        # x is the fractional position within the current cycle (0 to 1)
+        x = self.last_epoch / self.step_size - (cycle - 1)
+
+        # Compute scale factor (0 to 1 triangular wave)
+        up_fraction = self.step_size_up / self.step_size
+        if x <= up_fraction:
+            # Ascending phase: scale goes from 0 to 1
+            scale = x / up_fraction if up_fraction > 0 else 1.0
         else:
-            scale = (self.step_size - x) * (self.step_size / self.step_size_down)
-        
+            # Descending phase: scale goes from 1 to 0
+            down_fraction = self.step_size_down / self.step_size
+            scale = (1.0 - x) / down_fraction if down_fraction > 0 else 0.0
+
         if self.mode == 'triangular':
             lr = self.base_lr + (self.max_lr - self.base_lr) * max(0, scale)
         elif self.mode == 'triangular2':
             lr = self.base_lr + (self.max_lr - self.base_lr) * max(0, scale) / (2 ** (cycle - 1))
         else:  # exp_range
             lr = self.base_lr + (self.max_lr - self.base_lr) * max(0, scale) * (self.gamma ** self.last_epoch)
-        
+
         return [lr for _ in self.base_lrs]
 
 

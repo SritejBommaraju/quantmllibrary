@@ -54,10 +54,10 @@ def test_tensor_backward():
     
     # dy/dx = 2x = 4.0 at x=2.0
     grad = x.grad
-    if isinstance(grad, list):
-        grad_val = grad[0][0] if isinstance(grad[0], list) else grad[0]
+    if hasattr(grad, 'item'):
+        grad_val = grad.item()
     else:
-        grad_val = grad[0] if hasattr(grad, '__getitem__') else grad
+        grad_val = grad[0][0] if isinstance(grad[0], list) else grad[0]
     
     assert grad_val == pytest.approx(4.0, abs=0.1)
 

@@ -49,57 +49,12 @@ class Dropout:
         """
         if not self.training or self.p == 0:
             return x
-        
-        # Apply dropout mask
+
+        # Create a mask tensor and multiply — this preserves the autograd graph
         scale = 1.0 / (1.0 - self.p)
-        
-        data = x.data
-        if isinstance(data[0], list):
-            # 2D case (common for dropout)
-            if isinstance(data[0][0], list):
-                # 3D
-                out_data = []
-                for i in range(len(data)):
-                    batch_out = []
-                    for j in range(len(data[i])):
-                        row_out = []
-                        for k in range(len(data[i][j])):
-                            if random.random() > self.p:
-                                row_out.append(float(data[i][j][k]) * scale)
-                            else:
-                                row_out.append(0.0)
-                        batch_out.append(row_out)
-                    out_data.append(batch_out)
-            else:
-                # 2D
-                out_data = []
-                for i in range(len(data)):
-                    row_out = []
-                    for j in range(len(data[i])):
-                        if random.random() > self.p:
-                            row_out.append(float(data[i][j]) * scale)
-                        else:
-                            row_out.append(0.0)
-                    out_data.append(row_out)
-        else:
-            # 1D
-            out_data = []
-            for i in range(len(data)):
-                if random.random() > self.p:
-                    out_data.append(float(data[i]) * scale)
-                else:
-                    out_data.append(0.0)
-        
-        # Note: Dropout backward is handled because we are returning a new Tensor
-        # However, for correct autograd, we should probably implement it as an op
-        # Or multiply by a mask tensor
-        
-        # Better approach for autograd: Create a mask tensor and multiply
-        # This ensures the graph captures the dropout operation correctly
-        
         mask_data = self._generate_mask_data(x.data, scale)
         mask = Tensor(mask_data, requires_grad=False)
-        
+
         return ops.mul(x, mask)
     
     def _generate_mask_data(self, data, scale):

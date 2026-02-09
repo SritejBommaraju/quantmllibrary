@@ -135,7 +135,8 @@ class BatchNorm1d:
                     (1 - m) * float(rm_data[i]) + m * float(bm_data[i])
                     for i in range(self.num_features)
                 ]
-                self.running_mean._data = new_rm
+                self.running_mean._data_list = new_rm
+                self.running_mean._np_array = None
             
             if self.running_var is not None:
                 m = self.momentum
@@ -148,7 +149,8 @@ class BatchNorm1d:
                     (1 - m) * float(rv_data[i]) + m * float(bv_data[i]) * unbiased_factor
                     for i in range(self.num_features)
                 ]
-                self.running_var._data = new_rv
+                self.running_var._data_list = new_rv
+                self.running_var._np_array = None
                 
             self.num_batches_tracked += 1
             

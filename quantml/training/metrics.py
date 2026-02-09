@@ -79,33 +79,28 @@ def sortino_ratio(returns: Union[List, any], risk_free_rate: float = 0.0, annual
         try:
             ret_arr = np.array(returns, dtype=np.float64)
             mean_ret = np.mean(ret_arr)
-            # Downside deviation: only negative returns
-            downside = ret_arr[ret_arr < 0]
-            if len(downside) == 0:
-                return float('inf') if mean_ret > risk_free_rate else 0.0
-            downside_std = np.std(downside)
+            # Downside deviation: sqrt(mean(min(r - target, 0)^2)) over ALL returns
+            downside_diff = np.minimum(ret_arr - risk_free_rate, 0.0)
+            downside_std = np.sqrt(np.mean(downside_diff ** 2))
             if downside_std == 0:
-                return 0.0
+                return float('inf') if mean_ret > risk_free_rate else 0.0
             sortino = (mean_ret - risk_free_rate) / downside_std
             if annualize:
                 sortino *= math.sqrt(252)
             return float(sortino)
         except (ValueError, TypeError):
             pass
-    
+
     # Pure Python fallback
     mean_ret = sum(returns) / len(returns)
-    downside = [r for r in returns if r < 0]
-    if len(downside) == 0:
-        return float('inf') if mean_ret > risk_free_rate else 0.0
-    
-    downside_mean = sum(downside) / len(downside)
-    downside_var = sum((d - downside_mean) ** 2 for d in downside) / len(downside)
+    # Downside deviation: sqrt(mean(min(r - target, 0)^2)) over ALL returns
+    downside_sq = [min(r - risk_free_rate, 0.0) ** 2 for r in returns]
+    downside_var = sum(downside_sq) / len(downside_sq)
     downside_std = math.sqrt(downside_var) if downside_var > 0 else 0.0
-    
+
     if downside_std == 0:
-        return 0.0
-    
+        return float('inf') if mean_ret > risk_free_rate else 0.0
+
     sortino = (mean_ret - risk_free_rate) / downside_std
     if annualize:
         sortino *= math.sqrt(252)

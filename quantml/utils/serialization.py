@@ -279,14 +279,13 @@ def _tensor_to_numpy(t: Tensor):
 def _update_tensor_data(param: Tensor, data) -> None:
     """Update tensor data in-place."""
     if isinstance(data, list):
-        param._data = data
+        param._data_list = data
     else:
         # NumPy array
-        param._data = data.tolist() if hasattr(data, 'tolist') else list(data)
-    
-    # Clear cached numpy array if it exists
-    if hasattr(param, '_np_array'):
-        param._np_array = None
+        param._data_list = data.tolist() if hasattr(data, 'tolist') else list(data)
+
+    # Clear cached numpy array so it gets rebuilt from _data_list
+    param._np_array = None
 
 
 def _get_optimizer_state(optimizer) -> Dict[str, Any]:

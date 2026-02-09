@@ -55,22 +55,19 @@ class TCNBlock:
         self.dilation = dilation
         self.stride = stride
         
-        # Initialize convolution weights
-        # For simplicity, we'll use a linear layer approach
-        # In a full implementation, this would be a proper convolution
-        limit = math.sqrt(1.0 / (in_channels * kernel_size))
-        weight_data = [[[(2.0 * limit * (i * out_channels * kernel_size + 
-                                         j * kernel_size + k) / 
-                           (in_channels * out_channels * kernel_size) - limit)
-                         for k in range(kernel_size)]
+        # Initialize weights as 2D (out_channels, in_channels)
+        # This is a simplified linear transformation approach.
+        # A full TCN implementation would use proper causal dilated convolution.
+        limit = math.sqrt(1.0 / in_channels)
+        weight_data = [[(2.0 * limit * (i * in_channels + j) /
+                          (in_channels * out_channels) - limit)
                         for j in range(in_channels)]
                        for i in range(out_channels)]
-        
-        # Flatten for matrix multiplication
+
         self.weight = Tensor(weight_data, requires_grad=True)
-        
-        # Bias
-        bias_data = [[0.0] for _ in range(out_channels)]
+
+        # Bias: (1, out_channels) for broadcasting with (batch, out_channels)
+        bias_data = [[0.0] * out_channels]
         self.bias = Tensor(bias_data, requires_grad=True)
     
     def forward(self, x: Tensor) -> Tensor:
@@ -91,49 +88,22 @@ class TCNBlock:
         # Ensure 2D input
         x_data = x.data if isinstance(x.data[0], list) else [x.data]
         x_2d = Tensor(x_data)
-        
-        # Simple linear transformation (simplified convolution)
-        # In full implementation, this would be a proper causal convolution
-        weight_flat = self._flatten_weight()
-        weight_T = self._transpose(weight_flat)
-        
-        # Apply transformation
+
+        # Linear transformation: x @ weight^T + bias
+        weight_T = ops.transpose(self.weight)
         out = ops.matmul(x_2d, weight_T)
-        
+
         # Add bias
         out = ops.add(out, self.bias)
-        
+
         # Apply activation (ReLU)
         out = ops.relu(out)
-        
+
         # Residual connection if dimensions match
         if self.in_channels == self.out_channels:
             out = ops.add(out, x_2d)
-        
+
         return out
-    
-    def _flatten_weight(self) -> Tensor:
-        """Flatten weight tensor for matrix multiplication."""
-        # Flatten kernel dimension
-        flat_data = []
-        for out_ch in range(self.out_channels):
-            row = []
-            for in_ch in range(self.in_channels):
-                for k in range(self.kernel_size):
-                    row.append(self.weight.data[out_ch][in_ch][k])
-            flat_data.append(row)
-        return Tensor(flat_data, requires_grad=self.weight.requires_grad)
-    
-    def _transpose(self, t: Tensor) -> Tensor:
-        """Transpose a 2D tensor."""
-        if not isinstance(t.data[0], list):
-            data = [t.data]
-        else:
-            data = t.data
-        
-        transposed = [[data[j][i] for j in range(len(data))] 
-                     for i in range(len(data[0]))]
-        return Tensor(transposed, requires_grad=t.requires_grad)
     
     def parameters(self) -> list:
         """Get all trainable parameters."""
@@ -210,16 +180,9 @@ class TCN:
         out = x
         for block in self.blocks:
             out = block.forward(out)
-        
-        # Global pooling (mean over sequence) and output layer
-        # For simplicity, take last timestep
-        if isinstance(out.data[0], list):
-            # Take last element of sequence
-            last = Tensor([[out.data[i][-1] for i in range(len(out.data))]])
-        else:
-            last = out
-        
-        output = self.output_layer.forward(last)
+
+        # Output layer: blocks produce (batch, hidden), pass directly
+        output = self.output_layer.forward(out)
         return output
     
     def parameters(self) -> list:
