@@ -9,7 +9,7 @@ A clean, minimal, hackable ML library optimized for:
 - Time-series operations native to quant workflows
 """
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 # Core components
 from quantml.tensor import Tensor
